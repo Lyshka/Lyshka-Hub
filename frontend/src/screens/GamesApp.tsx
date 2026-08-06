@@ -45,16 +45,6 @@ function formatUsd(value: number | null | undefined) {
   })}`;
 }
 
-function formatUsd(value: number | null | undefined) {
-  if (value == null) {
-    return '—';
-  }
-  return `$${value.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
 function EyeIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
