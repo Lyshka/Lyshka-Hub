@@ -45,6 +45,122 @@ function formatUsd(value: number | null | undefined) {
   })}`;
 }
 
+function formatUsd(value: number | null | undefined) {
+  if (value == null) {
+    return '—';
+  }
+  return `$${value.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function EyeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <circle cx="12" cy="12" r="2.8" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M3 3 21 21"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10.6 10.6A2.8 2.8 0 0 0 12 15.2a2.8 2.8 0 0 0 2.4-1.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.7 6.8C4.6 8.2 3.1 10 2.5 12c0 0 3.5 6.5 9.5 6.5 1.6 0 3.1-.4 4.4-1.1M9.9 5.3A10.1 10.1 0 0 1 12 5c6 0 9.5 6.5 9.5 6.5a16.2 16.2 0 0 1-4.2 4.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function SecretInput({
+  value,
+  onChange,
+  placeholder,
+  inputMode = 'text',
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  inputMode?: 'text' | 'email';
+}) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <div className="relative">
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        type={visible ? 'text' : 'password'}
+        inputMode={inputMode}
+        autoComplete="off"
+        className="w-full rounded-xl border-0 py-2.5 pr-11 pl-3 outline-none"
+        style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((current) => !current)}
+        aria-label={visible ? 'Скрыть' : 'Показать'}
+        className="absolute top-1/2 right-2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg"
+        style={{ color: 'var(--tg-hint)' }}
+      >
+        {visible ? <EyeOffIcon /> : <EyeIcon />}
+      </button>
+    </div>
+  );
+}
+
+function SecretRow({ label, value }: { label: string; value: string }) {
+  const [visible, setVisible] = useState(false);
+  const hasValue = Boolean(value.trim());
+
+  return (
+    <div className="flex items-center gap-2">
+      <p className="min-w-0 flex-1 truncate">
+        <span style={{ color: 'var(--tg-hint)' }}>{label}: </span>
+        <span style={{ color: 'var(--tg-text)' }}>
+          {hasValue ? (visible ? value : '••••••••') : '—'}
+        </span>
+      </p>
+      {hasValue ? (
+        <button
+          type="button"
+          onClick={() => setVisible((current) => !current)}
+          aria-label={visible ? `Скрыть ${label.toLowerCase()}` : `Показать ${label.toLowerCase()}`}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+          style={{
+            color: 'var(--tg-hint)',
+            background: 'color-mix(in srgb, var(--app-surface-muted) 45%, transparent)',
+          }}
+        >
+          {visible ? <EyeOffIcon /> : <EyeIcon />}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function AccountFields({
   email,
   login,
@@ -58,21 +174,16 @@ function AccountFields({
 }) {
   return (
     <>
-      <input
+      <SecretInput
         value={login}
-        onChange={(e) => onLoginChange(e.target.value)}
+        onChange={onLoginChange}
         placeholder="Логин Steam (необязательно)"
-        className="w-full rounded-xl border-0 px-3 py-2.5 outline-none"
-        style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
       />
-      <input
+      <SecretInput
         value={email}
-        onChange={(e) => onEmailChange(e.target.value)}
+        onChange={onEmailChange}
         placeholder="Почта аккаунта (необязательно)"
-        type="email"
-        autoComplete="email"
-        className="w-full rounded-xl border-0 px-3 py-2.5 outline-none"
-        style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
+        inputMode="email"
       />
       <p className="text-xs leading-relaxed" style={{ color: 'var(--tg-hint)' }}>
         Необязательно — для своих заметок.
@@ -781,23 +892,13 @@ function AccountCard({
         </div>
       ) : (
         <div
-          className="mt-3 rounded-xl px-3 py-2 text-xs"
+          className="mt-3 space-y-2 rounded-xl px-3 py-2 text-xs"
           style={{
             background: 'color-mix(in srgb, var(--app-surface-muted) 55%, transparent)',
           }}
         >
-          <p style={{ color: 'var(--tg-hint)' }}>
-            Логин:{' '}
-            <span style={{ color: 'var(--tg-text)' }}>
-              {profile.accountLogin || '—'}
-            </span>
-          </p>
-          <p className="mt-1" style={{ color: 'var(--tg-hint)' }}>
-            Почта:{' '}
-            <span style={{ color: 'var(--tg-text)' }}>
-              {profile.accountEmail || '—'}
-            </span>
-          </p>
+          <SecretRow label="Логин" value={profile.accountLogin} />
+          <SecretRow label="Почта" value={profile.accountEmail} />
           <button
             type="button"
             disabled={busy}
