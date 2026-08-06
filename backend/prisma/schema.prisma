@@ -140,6 +140,8 @@ model SteamProfile {
   avatarUrl            String               @default("")
   accountEmail         String               @default("")
   accountLogin         String               @default("")
+  weeklyDropDone       Boolean              @default(false)
+  weeklyDropDoneAt     DateTime?
   active               Boolean              @default(false)
   lastSyncAt           DateTime?
   lastInventorySyncAt  DateTime?
@@ -154,6 +156,7 @@ model SteamProfile {
   @@index([userId])
   @@index([steamId])
   @@index([userId, active])
+  @@index([weeklyDropDone])
 }
 
 model SteamWishlistGame {

@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class GamesInitDto {
   @IsOptional()
@@ -46,4 +46,9 @@ export class GamesUpdateProfileDto extends GamesProfileDto {
   @IsString()
   @MaxLength(64)
   accountLogin?: string;
+}
+
+export class GamesWeeklyDropDto extends GamesProfileDto {
+  @IsBoolean()
+  done!: boolean;
 }

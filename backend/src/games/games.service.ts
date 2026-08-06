@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
+import { Markup } from 'telegraf';
+import { AppsService } from '../apps/apps.service';
+import { BotService } from '../bot/bot.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   fetchBulkMarketPricesUsd,
@@ -20,6 +23,40 @@ import {
   sleep,
 } from './games.steam';
 
+function nextWednesdayLabel(now = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Moscow',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+  });
+  const parts = formatter.formatToParts(now);
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  const weekday = get('weekday');
+  const year = Number(get('year'));
+  const month = Number(get('month'));
+  const day = Number(get('day'));
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  const current = weekdayMap[weekday] ?? 0;
+  const daysUntil = current === 3 ? 7 : (3 - current + 7) % 7;
+  const next = new Date(Date.UTC(year, month - 1, day + daysUntil));
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'long',
+  }).format(next);
+}
+
 function serializeProfile(
   profile: {
     id: string;
@@ -29,6 +66,8 @@ function serializeProfile(
     avatarUrl: string;
     accountEmail?: string;
     accountLogin?: string;
+    weeklyDropDone?: boolean;
+    weeklyDropDoneAt?: Date | null;
     active: boolean;
     lastSyncAt: Date | null;
     lastInventorySyncAt?: Date | null;
@@ -50,6 +89,8 @@ function serializeProfile(
     avatarUrl: profile.avatarUrl,
     accountEmail: profile.accountEmail ?? '',
     accountLogin: profile.accountLogin ?? '',
+    weeklyDropDone: Boolean(profile.weeklyDropDone),
+    weeklyDropDoneAt: profile.weeklyDropDoneAt?.toISOString() ?? null,
     active: profile.active,
     profileUrl: profile.vanityUrl
       ? `https://steamcommunity.com/id/${profile.vanityUrl}`
@@ -92,9 +133,13 @@ function serializeGame(row: {
 
 @Injectable()
 export class GamesService {
+  private readonly dropNotified = new Map<string, number>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly botService: BotService,
+    private readonly appsService: AppsService,
   ) {}
 
   private steamApiKey() {
@@ -224,6 +269,8 @@ export class GamesService {
 
       const owned = games.filter((g) => g.owned);
       const missing = games.filter((g) => !g.owned);
+      const dropDone = profiles.filter((p) => p.weeklyDropDone).length;
+      const dropPending = profiles.length - dropDone;
 
       return {
         steamConfigured: Boolean(this.steamApiKey()),
@@ -234,6 +281,12 @@ export class GamesService {
           ? serializeProfile(active, statsByProfile.get(active.id))
           : null,
         stats: aggregate,
+        weeklyDrop: {
+          total: profiles.length,
+          done: dropDone,
+          pending: dropPending,
+          nextResetLabel: nextWednesdayLabel(),
+        },
         owned: owned.map(serializeGame),
         missing: missing.map(serializeGame),
       };
@@ -245,7 +298,10 @@ export class GamesService {
   async linkProfile(
     userId: number,
     steamInput: string,
-    meta?: { accountEmail?: string; accountLogin?: string },
+    meta?: {
+      accountEmail?: string;
+      accountLogin?: string;
+    },
   ) {
     try {
       const apiKey = this.steamApiKey();
@@ -300,7 +356,10 @@ export class GamesService {
   async updateProfile(
     userId: number,
     profileId: string,
-    meta?: { accountEmail?: string; accountLogin?: string },
+    meta?: {
+      accountEmail?: string;
+      accountLogin?: string;
+    },
   ) {
     try {
       const profile = await this.prisma.steamProfile.findFirst({
@@ -313,6 +372,27 @@ export class GamesService {
       await this.prisma.steamProfile.update({
         where: { id: profileId },
         data: fields,
+      });
+      return this.overview(userId);
+    } catch (err) {
+      this.rethrowDbError(err);
+    }
+  }
+
+  async setWeeklyDrop(userId: number, profileId: string, done: boolean) {
+    try {
+      const profile = await this.prisma.steamProfile.findFirst({
+        where: { id: profileId, userId: BigInt(userId) },
+      });
+      if (!profile) {
+        throw new NotFoundException('Аккаунт не найден');
+      }
+      await this.prisma.steamProfile.update({
+        where: { id: profileId },
+        data: {
+          weeklyDropDone: done,
+          weeklyDropDoneAt: done ? new Date() : null,
+        },
       });
       return this.overview(userId);
     } catch (err) {
@@ -839,6 +919,110 @@ export class GamesService {
     for (const profile of profiles) {
       try {
         await this.syncProfile(Number(profile.userId), profile.id);
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  @Cron('0 0 * * 3', { timeZone: 'Europe/Moscow' })
+  async resetWeeklyDrops() {
+    await this.prisma.steamProfile.updateMany({
+      where: { weeklyDropDone: true },
+      data: {
+        weeklyDropDone: false,
+        weeklyDropDoneAt: null,
+      },
+    });
+  }
+
+  @Cron('*/15 * * * *')
+  async notifyWeeklyDrops() {
+    const local = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Moscow',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const get = (type: string) =>
+      local.find((part) => part.type === type)?.value ?? '';
+    const hour = Number(get('hour'));
+    const minute = Number(get('minute'));
+    const dayKey = `${get('year')}-${get('month')}-${get('day')}`;
+    const slots = [
+      { key: 'noon', hour: 12, minute: 0 },
+      { key: 'evening', hour: 20, minute: 0 },
+    ];
+    const activeSlot = slots.find(
+      (slot) =>
+        hour > slot.hour ||
+        (hour === slot.hour && minute >= slot.minute && minute < slot.minute + 15),
+    );
+    if (!activeSlot) {
+      return;
+    }
+
+    const pending = await this.prisma.steamProfile.findMany({
+      where: { weeklyDropDone: false },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        userId: true,
+        personaName: true,
+      },
+    });
+    if (pending.length === 0) {
+      return;
+    }
+
+    const subscribers = new Set(
+      await this.appsService.listSubscriberIds('games'),
+    );
+    const byUser = new Map<string, string[]>();
+    for (const row of pending) {
+      const userId = Number(row.userId);
+      if (!subscribers.has(userId)) {
+        continue;
+      }
+      const key = String(userId);
+      const list = byUser.get(key) ?? [];
+      list.push(row.personaName || 'Steam');
+      byUser.set(key, list);
+    }
+
+    const webAppUrl = this.botService.getWebAppUrl('games');
+    const now = Date.now();
+
+    for (const [userId, names] of byUser) {
+      const notifyKey = `${userId}:${dayKey}:${activeSlot.key}`;
+      if (this.dropNotified.has(notifyKey)) {
+        continue;
+      }
+      const shown = names.slice(0, 8);
+      const rest = names.length - shown.length;
+      const lines = shown.map((name) => `• ${name}`);
+      if (rest > 0) {
+        lines.push(`• и ещё ${rest}`);
+      }
+      const text = [
+        'CS2: не забудь сыграть и забрать еженедельный дроп',
+        '',
+        `Осталось аккаунтов: ${names.length}`,
+        '',
+        ...lines,
+        '',
+        `Сброс каждую среду · следующий ${nextWednesdayLabel()}`,
+      ].join('\n');
+      const extra = webAppUrl
+        ? Markup.inlineKeyboard([
+            Markup.button.webApp('Открыть Игры', webAppUrl),
+          ])
+        : undefined;
+      try {
+        await this.botService.sendMessage(Number(userId), text, extra);
+        this.dropNotified.set(notifyKey, now);
       } catch {
         continue;
       }

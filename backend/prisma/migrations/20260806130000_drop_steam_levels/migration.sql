@@ -1,0 +1,2 @@
+ALTER TABLE "SteamProfile" DROP COLUMN IF EXISTS "steamLevel";
+ALTER TABLE "SteamProfile" DROP COLUMN IF EXISTS "cs2Level";

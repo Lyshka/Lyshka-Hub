@@ -187,6 +187,8 @@ export type SteamProfile = {
   avatarUrl: string;
   accountEmail: string;
   accountLogin: string;
+  weeklyDropDone: boolean;
+  weeklyDropDoneAt: string | null;
   active: boolean;
   profileUrl: string;
   lastSyncAt: string | null;
@@ -211,6 +213,12 @@ export type GamesOverview = {
     missing: number;
     inventoryValueUsd: number;
     inventoryCount: number;
+  };
+  weeklyDrop: {
+    total: number;
+    done: number;
+    pending: number;
+    nextResetLabel: string;
   };
   owned: SteamGame[];
   missing: SteamGame[];
@@ -546,7 +554,10 @@ export const api = {
   gamesLink: (
     initData: string,
     steamInput: string,
-    meta?: { accountEmail?: string; accountLogin?: string },
+    meta?: {
+      accountEmail?: string;
+      accountLogin?: string;
+    },
   ) =>
     request<GamesOverview>('/api/games/link', {
       method: 'POST',
@@ -563,6 +574,11 @@ export const api = {
     request<GamesOverview>('/api/games/update', {
       method: 'POST',
       body: JSON.stringify({ initData, ...data }),
+    }),
+  gamesWeeklyDrop: (initData: string, profileId: string, done: boolean) =>
+    request<GamesOverview>('/api/games/weekly-drop', {
+      method: 'POST',
+      body: JSON.stringify({ initData, profileId, done }),
     }),
   gamesSelect: (initData: string, profileId: string) =>
     request<GamesOverview>('/api/games/select', {

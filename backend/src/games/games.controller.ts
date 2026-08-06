@@ -5,6 +5,7 @@ import {
   GamesLinkDto,
   GamesProfileDto,
   GamesUpdateProfileDto,
+  GamesWeeklyDropDto,
 } from './games.dto';
 import { GamesService } from './games.service';
 
@@ -46,6 +47,19 @@ export class GamesController {
       accountEmail: dto.accountEmail,
       accountLogin: dto.accountLogin,
     });
+  }
+
+  @Post('weekly-drop')
+  async weeklyDrop(@Body() dto: GamesWeeklyDropDto) {
+    const session = await this.authService.authenticateApp(
+      dto.initData ?? '',
+      'games',
+    );
+    return this.gamesService.setWeeklyDrop(
+      session.user.id,
+      dto.profileId,
+      dto.done,
+    );
   }
 
   @Post('select')
