@@ -1,6 +1,11 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { AuthService } from '../auth/auth.service';
-import { GamesInitDto, GamesLinkDto, GamesProfileDto } from './games.dto';
+import {
+  GamesInitDto,
+  GamesLinkDto,
+  GamesProfileDto,
+  GamesUpdateProfileDto,
+} from './games.dto';
 import { GamesService } from './games.service';
 
 @Controller('games')
@@ -25,7 +30,22 @@ export class GamesController {
       dto.initData ?? '',
       'games',
     );
-    return this.gamesService.linkProfile(session.user.id, dto.steamInput);
+    return this.gamesService.linkProfile(session.user.id, dto.steamInput, {
+      accountEmail: dto.accountEmail,
+      accountLogin: dto.accountLogin,
+    });
+  }
+
+  @Post('update')
+  async update(@Body() dto: GamesUpdateProfileDto) {
+    const session = await this.authService.authenticateApp(
+      dto.initData ?? '',
+      'games',
+    );
+    return this.gamesService.updateProfile(session.user.id, dto.profileId, {
+      accountEmail: dto.accountEmail,
+      accountLogin: dto.accountLogin,
+    });
   }
 
   @Post('select')

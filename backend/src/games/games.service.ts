@@ -27,6 +27,8 @@ function serializeProfile(
     vanityUrl: string | null;
     personaName: string;
     avatarUrl: string;
+    accountEmail?: string;
+    accountLogin?: string;
     active: boolean;
     lastSyncAt: Date | null;
     lastInventorySyncAt?: Date | null;
@@ -46,6 +48,8 @@ function serializeProfile(
     vanityUrl: profile.vanityUrl,
     personaName: profile.personaName || profile.steamId,
     avatarUrl: profile.avatarUrl,
+    accountEmail: profile.accountEmail ?? '',
+    accountLogin: profile.accountLogin ?? '',
     active: profile.active,
     profileUrl: profile.vanityUrl
       ? `https://steamcommunity.com/id/${profile.vanityUrl}`
@@ -95,6 +99,16 @@ export class GamesService {
 
   private steamApiKey() {
     return this.configService.get<string>('STEAM_API_KEY')?.trim() ?? '';
+  }
+
+  private normalizeAccountFields(data?: {
+    accountEmail?: string;
+    accountLogin?: string;
+  }) {
+    return {
+      accountEmail: (data?.accountEmail ?? '').trim().slice(0, 200),
+      accountLogin: (data?.accountLogin ?? '').trim().slice(0, 64),
+    };
   }
 
   private async setActiveProfile(userId: number, profileId: string) {
@@ -228,7 +242,11 @@ export class GamesService {
     }
   }
 
-  async linkProfile(userId: number, steamInput: string) {
+  async linkProfile(
+    userId: number,
+    steamInput: string,
+    meta?: { accountEmail?: string; accountLogin?: string },
+  ) {
     try {
       const apiKey = this.steamApiKey();
       const parsed = parseSteamInput(steamInput);
@@ -236,6 +254,7 @@ export class GamesService {
       const vanityUrl = parsed.vanity ?? null;
       const summary = await fetchPlayerSummary(steamId, apiKey);
       const uid = BigInt(userId);
+      const fields = this.normalizeAccountFields(meta);
 
       const existing = await this.prisma.steamProfile.findUnique({
         where: {
@@ -253,9 +272,11 @@ export class GamesService {
         data: {
           userId: uid,
           steamId,
-          vanityUrl,
+          vanityUrl: vanityUrl || summary.vanityLogin || null,
           personaName: summary.personaName,
           avatarUrl: summary.avatarUrl,
+          accountEmail: fields.accountEmail,
+          accountLogin: fields.accountLogin,
           active: false,
         },
       });
@@ -270,6 +291,29 @@ export class GamesService {
           //
         }
       }
+      return this.overview(userId);
+    } catch (err) {
+      this.rethrowDbError(err);
+    }
+  }
+
+  async updateProfile(
+    userId: number,
+    profileId: string,
+    meta?: { accountEmail?: string; accountLogin?: string },
+  ) {
+    try {
+      const profile = await this.prisma.steamProfile.findFirst({
+        where: { id: profileId, userId: BigInt(userId) },
+      });
+      if (!profile) {
+        throw new NotFoundException('Аккаунт не найден');
+      }
+      const fields = this.normalizeAccountFields(meta);
+      await this.prisma.steamProfile.update({
+        where: { id: profileId },
+        data: fields,
+      });
       return this.overview(userId);
     } catch (err) {
       this.rethrowDbError(err);
@@ -464,6 +508,12 @@ export class GamesService {
         lastSyncAt: now,
         personaName: summary.personaName,
         avatarUrl: summary.avatarUrl,
+        ...(summary.vanityLogin
+          ? {
+              vanityUrl: profile.vanityUrl || summary.vanityLogin,
+              accountLogin: profile.accountLogin || summary.vanityLogin,
+            }
+          : {}),
       },
     });
 

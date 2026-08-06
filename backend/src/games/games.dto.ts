@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class GamesInitDto {
   @IsOptional()
@@ -14,6 +14,16 @@ export class GamesLinkDto {
   @IsString()
   @MinLength(2)
   steamInput!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  accountEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  accountLogin?: string;
 }
 
 export class GamesProfileDto {
@@ -24,4 +34,16 @@ export class GamesProfileDto {
   @IsString()
   @MinLength(1)
   profileId!: string;
+}
+
+export class GamesUpdateProfileDto extends GamesProfileDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  accountEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  accountLogin?: string;
 }

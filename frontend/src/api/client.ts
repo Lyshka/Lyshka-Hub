@@ -185,6 +185,8 @@ export type SteamProfile = {
   vanityUrl: string | null;
   personaName: string;
   avatarUrl: string;
+  accountEmail: string;
+  accountLogin: string;
   active: boolean;
   profileUrl: string;
   lastSyncAt: string | null;
@@ -541,10 +543,26 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ initData }),
     }),
-  gamesLink: (initData: string, steamInput: string) =>
+  gamesLink: (
+    initData: string,
+    steamInput: string,
+    meta?: { accountEmail?: string; accountLogin?: string },
+  ) =>
     request<GamesOverview>('/api/games/link', {
       method: 'POST',
-      body: JSON.stringify({ initData, steamInput }),
+      body: JSON.stringify({ initData, steamInput, ...meta }),
+    }),
+  gamesUpdateProfile: (
+    initData: string,
+    data: {
+      profileId: string;
+      accountEmail?: string;
+      accountLogin?: string;
+    },
+  ) =>
+    request<GamesOverview>('/api/games/update', {
+      method: 'POST',
+      body: JSON.stringify({ initData, ...data }),
     }),
   gamesSelect: (initData: string, profileId: string) =>
     request<GamesOverview>('/api/games/select', {

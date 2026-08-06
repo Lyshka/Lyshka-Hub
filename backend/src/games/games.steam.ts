@@ -290,16 +290,16 @@ async function fetchGamesMeta(appIds: string[]) {
 async function fetchPlayerSummary(
   steamId: string,
   apiKey: string,
-): Promise<{ personaName: string; avatarUrl: string }> {
+): Promise<{ personaName: string; avatarUrl: string; vanityLogin: string }> {
   if (!apiKey) {
-    return { personaName: steamId, avatarUrl: '' };
+    return { personaName: steamId, avatarUrl: '', vanityLogin: '' };
   }
 
   const response = await fetch(
     `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${encodeURIComponent(apiKey)}&steamids=${encodeURIComponent(steamId)}`,
   );
   if (!response.ok) {
-    return { personaName: steamId, avatarUrl: '' };
+    return { personaName: steamId, avatarUrl: '', vanityLogin: '' };
   }
 
   const data = (await response.json()) as {
@@ -309,10 +309,13 @@ async function fetchPlayerSummary(
         avatarfull?: string;
         avatarmedium?: string;
         avatar?: string;
+        profileurl?: string;
       }[];
     };
   };
   const player = data.response?.players?.[0];
+  const profileUrl = player?.profileurl ?? '';
+  const vanityMatch = profileUrl.match(/steamcommunity\.com\/id\/([^/?#]+)/i);
   return {
     personaName: player?.personaname?.trim() || steamId,
     avatarUrl:
@@ -320,6 +323,7 @@ async function fetchPlayerSummary(
       player?.avatarmedium ||
       player?.avatar ||
       '',
+    vanityLogin: vanityMatch ? decodeURIComponent(vanityMatch[1]) : '',
   };
 }
 

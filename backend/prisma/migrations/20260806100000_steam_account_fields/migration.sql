@@ -1,0 +1,2 @@
+ALTER TABLE "SteamProfile" ADD COLUMN "accountEmail" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "SteamProfile" ADD COLUMN "accountLogin" TEXT NOT NULL DEFAULT '';

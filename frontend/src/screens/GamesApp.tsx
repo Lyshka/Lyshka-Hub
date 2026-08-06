@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   api,
   type GamesOverview,
@@ -45,6 +45,42 @@ function formatUsd(value: number | null | undefined) {
   })}`;
 }
 
+function AccountFields({
+  email,
+  login,
+  onEmailChange,
+  onLoginChange,
+}: {
+  email: string;
+  login: string;
+  onEmailChange: (value: string) => void;
+  onLoginChange: (value: string) => void;
+}) {
+  return (
+    <>
+      <input
+        value={login}
+        onChange={(e) => onLoginChange(e.target.value)}
+        placeholder="Логин Steam (необязательно)"
+        className="w-full rounded-xl border-0 px-3 py-2.5 outline-none"
+        style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
+      />
+      <input
+        value={email}
+        onChange={(e) => onEmailChange(e.target.value)}
+        placeholder="Почта аккаунта (необязательно)"
+        type="email"
+        autoComplete="email"
+        className="w-full rounded-xl border-0 px-3 py-2.5 outline-none"
+        style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
+      />
+      <p className="text-xs leading-relaxed" style={{ color: 'var(--tg-hint)' }}>
+        Необязательно — для своих заметок.
+      </p>
+    </>
+  );
+}
+
 export function GamesApp({ onBack }: GamesAppProps) {
   const { initData, haptic, isAdmin } = useTelegram();
   const [data, setData] = useState<GamesOverview | null>(null);
@@ -54,6 +90,8 @@ export function GamesApp({ onBack }: GamesAppProps) {
   const [tab, setTab] = useState<Tab>('accounts');
   const [gamesSubTab, setGamesSubTab] = useState<GamesSubTab>('owned');
   const [steamInput, setSteamInput] = useState('');
+  const [accountEmail, setAccountEmail] = useState('');
+  const [accountLogin, setAccountLogin] = useState('');
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -107,10 +145,15 @@ export function GamesApp({ onBack }: GamesAppProps) {
     setStatus('Добавляем аккаунт и синхронизируем…');
     haptic('medium');
     try {
-      const overview = await api.gamesLink(initData, steamInput.trim());
+      const overview = await api.gamesLink(initData, steamInput.trim(), {
+        accountEmail: accountEmail.trim() || undefined,
+        accountLogin: accountLogin.trim() || undefined,
+      });
       setData(overview);
       setInventory(null);
       setSteamInput('');
+      setAccountEmail('');
+      setAccountLogin('');
       setAdding(false);
       setStatus(
         `Синхронизировано: есть ${overview.stats.owned}, нет ${overview.stats.missing}`,
@@ -127,6 +170,27 @@ export function GamesApp({ onBack }: GamesAppProps) {
         //
       }
       setStatus(err instanceof Error ? err.message : 'Ошибка привязки');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateAccount(
+    profileId: string,
+    meta: { accountEmail?: string; accountLogin?: string },
+  ) {
+    setBusy(true);
+    setStatus(null);
+    haptic('light');
+    try {
+      const overview = await api.gamesUpdateProfile(initData, {
+        profileId,
+        ...meta,
+      });
+      setData(overview);
+      setStatus('Данные аккаунта сохранены');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Ошибка сохранения');
     } finally {
       setBusy(false);
     }
@@ -311,6 +375,7 @@ export function GamesApp({ onBack }: GamesAppProps) {
                       busy={busy}
                       onSelect={() => void selectAccount(profile.id)}
                       onDelete={() => void deleteAccount(profile.id)}
+                      onUpdate={(meta) => void updateAccount(profile.id, meta)}
                     />
                   ))}
                 </section>
@@ -346,8 +411,7 @@ export function GamesApp({ onBack }: GamesAppProps) {
                   {hasAccounts ? 'Новый Steam аккаунт' : 'Привязка Steam'}
                 </p>
                 <p className="text-sm" style={{ color: 'var(--tg-hint)' }}>
-                  Вставь ссылку на профиль, Steam ID или ник. После добавления
-                  ссылку изменить нельзя — только удалить аккаунт.
+                  Вставь ссылку на профиль, Steam ID или ник.
                 </p>
                 <input
                   value={steamInput}
@@ -355,6 +419,12 @@ export function GamesApp({ onBack }: GamesAppProps) {
                   placeholder="https://steamcommunity.com/id/ник"
                   className="w-full rounded-xl border-0 px-3 py-2.5 outline-none"
                   style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
+                />
+                <AccountFields
+                  email={accountEmail}
+                  login={accountLogin}
+                  onEmailChange={setAccountEmail}
+                  onLoginChange={setAccountLogin}
                 />
                 <div className="flex gap-2">
                   <button
@@ -376,6 +446,8 @@ export function GamesApp({ onBack }: GamesAppProps) {
                       onClick={() => {
                         setAdding(false);
                         setSteamInput('');
+                        setAccountEmail('');
+                        setAccountLogin('');
                       }}
                       className="rounded-2xl px-4 py-3 text-sm font-semibold disabled:opacity-50"
                       style={{
@@ -615,12 +687,23 @@ function AccountCard({
   busy,
   onSelect,
   onDelete,
+  onUpdate,
 }: {
   profile: SteamProfile;
   busy: boolean;
   onSelect: () => void;
   onDelete: () => void;
+  onUpdate: (meta: { accountEmail?: string; accountLogin?: string }) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [email, setEmail] = useState(profile.accountEmail);
+  const [login, setLogin] = useState(profile.accountLogin);
+
+  useEffect(() => {
+    setEmail(profile.accountEmail);
+    setLogin(profile.accountLogin);
+  }, [profile.accountEmail, profile.accountLogin]);
+
   return (
     <article
       className="rounded-[24px] px-3 py-3"
@@ -651,6 +734,81 @@ function AccountCard({
         </button>
         <ProfileLinkButton href={profile.profileUrl} />
       </div>
+
+      {editing ? (
+        <div className="mt-3 space-y-2">
+          <AccountFields
+            email={email}
+            login={login}
+            onEmailChange={setEmail}
+            onLoginChange={setLogin}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onUpdate({
+                  accountEmail: email.trim(),
+                  accountLogin: login.trim(),
+                });
+                setEditing(false);
+              }}
+              className="flex-1 rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
+              style={{
+                background: 'linear-gradient(145deg, #1b2838, #2a475e)',
+                color: '#c7d5e0',
+              }}
+            >
+              Сохранить
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEmail(profile.accountEmail);
+                setLogin(profile.accountLogin);
+                setEditing(false);
+              }}
+              className="rounded-xl px-3 py-2 text-sm"
+              style={{
+                background:
+                  'color-mix(in srgb, var(--app-surface-muted) 55%, transparent)',
+              }}
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="mt-3 rounded-xl px-3 py-2 text-xs"
+          style={{
+            background: 'color-mix(in srgb, var(--app-surface-muted) 55%, transparent)',
+          }}
+        >
+          <p style={{ color: 'var(--tg-hint)' }}>
+            Логин:{' '}
+            <span style={{ color: 'var(--tg-text)' }}>
+              {profile.accountLogin || '—'}
+            </span>
+          </p>
+          <p className="mt-1" style={{ color: 'var(--tg-hint)' }}>
+            Почта:{' '}
+            <span style={{ color: 'var(--tg-text)' }}>
+              {profile.accountEmail || '—'}
+            </span>
+          </p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setEditing(true)}
+            className="mt-2 text-xs font-semibold disabled:opacity-50"
+            style={{ color: 'var(--app-link)' }}
+          >
+            Изменить данные
+          </button>
+        </div>
+      )}
 
       <div className="mt-3 grid grid-cols-3 gap-2">
         <MiniStat label="Всего" value={profile.stats.total} />

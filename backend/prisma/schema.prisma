@@ -138,6 +138,8 @@ model SteamProfile {
   vanityUrl            String?
   personaName          String               @default("")
   avatarUrl            String               @default("")
+  accountEmail         String               @default("")
+  accountLogin         String               @default("")
   active               Boolean              @default(false)
   lastSyncAt           DateTime?
   lastInventorySyncAt  DateTime?
