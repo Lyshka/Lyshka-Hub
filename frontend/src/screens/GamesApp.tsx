@@ -151,6 +151,88 @@ function SecretRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function formatHours(value: number | null | undefined) {
+  if (value == null) {
+    return '—';
+  }
+  return `${value.toLocaleString('ru-RU', {
+    maximumFractionDigits: 1,
+  })} ч`;
+}
+
+function formatCs2Experience(profile: SteamProfile) {
+  if (profile.cs2ProfileRank != null && profile.cs2ProfileXp != null) {
+    return `Ур. ${profile.cs2ProfileRank} · ${profile.cs2ProfileXp.toLocaleString('ru-RU')} XP`;
+  }
+  if (profile.cs2ProfileRank != null) {
+    return `Ур. ${profile.cs2ProfileRank}`;
+  }
+  if (profile.cs2ProfileXp != null) {
+    return `${profile.cs2ProfileXp.toLocaleString('ru-RU')} XP`;
+  }
+  return '—';
+}
+
+function Cs2StatsRow({ profile }: { profile: SteamProfile }) {
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-2">
+      <div
+        className="rounded-2xl px-3 py-2.5"
+        style={{
+          background: 'color-mix(in srgb, var(--app-surface) 72%, transparent)',
+        }}
+      >
+        <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--tg-hint)' }}>
+          Опыт CS2
+        </p>
+        <p className="mt-1 text-sm font-semibold">{formatCs2Experience(profile)}</p>
+      </div>
+      <div
+        className="rounded-2xl px-3 py-2.5"
+        style={{
+          background: 'color-mix(in srgb, var(--app-surface) 72%, transparent)',
+        }}
+      >
+        <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--tg-hint)' }}>
+          Premier
+        </p>
+        <p className="mt-1 text-sm font-semibold">
+          {profile.cs2PremierRating != null
+            ? profile.cs2PremierRating.toLocaleString('ru-RU')
+            : '—'}
+        </p>
+      </div>
+      <div
+        className="rounded-2xl px-3 py-2.5"
+        style={{
+          background: 'color-mix(in srgb, var(--app-surface) 72%, transparent)',
+        }}
+      >
+        <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--tg-hint)' }}>
+          Steam LVL
+        </p>
+        <p className="mt-1 text-sm font-semibold">
+          {profile.steamLevel != null ? profile.steamLevel : '—'}
+        </p>
+      </div>
+      <div
+        className="rounded-2xl px-3 py-2.5"
+        style={{
+          background: 'color-mix(in srgb, var(--app-surface) 72%, transparent)',
+        }}
+      >
+        <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--tg-hint)' }}>
+          В CS2
+        </p>
+        <p className="mt-1 text-sm font-semibold">{formatHours(profile.cs2Hours)}</p>
+      </div>
+      <p className="col-span-2 px-1 text-[11px]" style={{ color: 'var(--tg-hint)' }}>
+        Авто · Leetify + Steam · {formatSync(profile.cs2StatsSyncedAt)}
+      </p>
+    </div>
+  );
+}
+
 function AccountFields({
   email,
   login,
@@ -973,6 +1055,8 @@ function AccountCard({
         </button>
         <ProfileLinkButton href={profile.profileUrl} />
       </div>
+
+      <Cs2StatsRow profile={profile} />
 
       <button
         type="button"

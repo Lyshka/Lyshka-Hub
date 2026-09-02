@@ -189,6 +189,13 @@ export type SteamProfile = {
   accountLogin: string;
   weeklyDropDone: boolean;
   weeklyDropDoneAt: string | null;
+  steamLevel: number | null;
+  cs2Hours: number | null;
+  cs2PremierRating: number | null;
+  cs2ProfileRank: number | null;
+  cs2ProfileXp: number | null;
+  cs2WingmanRank: number | null;
+  cs2StatsSyncedAt: string | null;
   active: boolean;
   profileUrl: string;
   lastSyncAt: string | null;

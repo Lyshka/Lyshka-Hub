@@ -142,6 +142,13 @@ model SteamProfile {
   accountLogin         String               @default("")
   weeklyDropDone       Boolean              @default(false)
   weeklyDropDoneAt     DateTime?
+  steamLevel           Int?
+  cs2Hours             Float?
+  cs2PremierRating     Int?
+  cs2ProfileRank       Int?
+  cs2ProfileXp         Int?
+  cs2WingmanRank       Int?
+  cs2StatsSyncedAt     DateTime?
   active               Boolean              @default(false)
   lastSyncAt           DateTime?
   lastInventorySyncAt  DateTime?

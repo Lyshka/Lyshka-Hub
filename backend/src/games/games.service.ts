@@ -22,6 +22,7 @@ import {
   resolveSteamId,
   sleep,
 } from './games.steam';
+import { fetchCs2AccountStats } from './games.cs2stats';
 
 function nextWednesdayLabel(now = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -68,6 +69,13 @@ function serializeProfile(
     accountLogin?: string;
     weeklyDropDone?: boolean;
     weeklyDropDoneAt?: Date | null;
+    steamLevel?: number | null;
+    cs2Hours?: number | null;
+    cs2PremierRating?: number | null;
+    cs2ProfileRank?: number | null;
+    cs2ProfileXp?: number | null;
+    cs2WingmanRank?: number | null;
+    cs2StatsSyncedAt?: Date | null;
     active: boolean;
     lastSyncAt: Date | null;
     lastInventorySyncAt?: Date | null;
@@ -91,6 +99,13 @@ function serializeProfile(
     accountLogin: profile.accountLogin ?? '',
     weeklyDropDone: Boolean(profile.weeklyDropDone),
     weeklyDropDoneAt: profile.weeklyDropDoneAt?.toISOString() ?? null,
+    steamLevel: profile.steamLevel ?? null,
+    cs2Hours: profile.cs2Hours ?? null,
+    cs2PremierRating: profile.cs2PremierRating ?? null,
+    cs2ProfileRank: profile.cs2ProfileRank ?? null,
+    cs2ProfileXp: profile.cs2ProfileXp ?? null,
+    cs2WingmanRank: profile.cs2WingmanRank ?? null,
+    cs2StatsSyncedAt: profile.cs2StatsSyncedAt?.toISOString() ?? null,
     active: profile.active,
     profileUrl: profile.vanityUrl
       ? `https://steamcommunity.com/id/${profile.vanityUrl}`
@@ -598,10 +613,32 @@ export class GamesService {
     });
 
     try {
+      await this.syncCs2Stats(profile.id, profile.steamId);
+    } catch {
+      //
+    }
+
+    try {
       await this.syncInventory(profile.id, profile.steamId);
     } catch {
       //
     }
+  }
+
+  private async syncCs2Stats(profileId: string, steamId: string) {
+    const stats = await fetchCs2AccountStats(steamId, this.steamApiKey());
+    await this.prisma.steamProfile.update({
+      where: { id: profileId },
+      data: {
+        steamLevel: stats.steamLevel,
+        cs2Hours: stats.cs2Hours,
+        cs2PremierRating: stats.cs2PremierRating,
+        cs2ProfileRank: stats.cs2ProfileRank,
+        cs2ProfileXp: stats.cs2ProfileXp,
+        cs2WingmanRank: stats.cs2WingmanRank,
+        cs2StatsSyncedAt: new Date(),
+      },
+    });
   }
 
   async syncInventory(profileId: string, steamId: string) {
