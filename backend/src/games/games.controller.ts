@@ -49,6 +49,42 @@ export class GamesController {
     });
   }
 
+  @Post('cs2-auth/start')
+  async startCs2Auth(@Body() dto: GamesProfileDto) {
+    const session = await this.authService.authenticateApp(
+      dto.initData ?? '',
+      'games',
+    );
+    return this.gamesService.startCs2Auth(session.user.id, dto.profileId);
+  }
+
+  @Post('cs2-auth/status')
+  async cs2AuthStatus(@Body() dto: GamesProfileDto) {
+    const session = await this.authService.authenticateApp(
+      dto.initData ?? '',
+      'games',
+    );
+    return this.gamesService.cs2AuthStatus(session.user.id, dto.profileId);
+  }
+
+  @Post('cs2-auth/disconnect')
+  async disconnectCs2Auth(@Body() dto: GamesProfileDto) {
+    const session = await this.authService.authenticateApp(
+      dto.initData ?? '',
+      'games',
+    );
+    return this.gamesService.disconnectCs2Auth(session.user.id, dto.profileId);
+  }
+
+  @Post('cs2-auth/sync')
+  async syncCs2Auth(@Body() dto: GamesProfileDto) {
+    const session = await this.authService.authenticateApp(
+      dto.initData ?? '',
+      'games',
+    );
+    return this.gamesService.syncCs2Auth(session.user.id, dto.profileId);
+  }
+
   @Post('weekly-drop')
   async weeklyDrop(@Body() dto: GamesWeeklyDropDto) {
     const session = await this.authService.authenticateApp(

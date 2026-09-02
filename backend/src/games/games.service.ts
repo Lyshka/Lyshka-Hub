@@ -23,6 +23,7 @@ import {
   sleep,
 } from './games.steam';
 import { fetchCs2AccountStats } from './games.cs2stats';
+import { SteamGcService } from './steam-gc.service';
 
 function nextWednesdayLabel(now = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -69,13 +70,14 @@ function serializeProfile(
     accountLogin?: string;
     weeklyDropDone?: boolean;
     weeklyDropDoneAt?: Date | null;
-    steamLevel?: number | null;
     cs2Hours?: number | null;
     cs2PremierRating?: number | null;
     cs2ProfileRank?: number | null;
     cs2ProfileXp?: number | null;
     cs2WingmanRank?: number | null;
     cs2StatsSyncedAt?: Date | null;
+    cs2AuthToken?: string | null;
+    cs2AuthConnectedAt?: Date | null;
     active: boolean;
     lastSyncAt: Date | null;
     lastInventorySyncAt?: Date | null;
@@ -99,13 +101,14 @@ function serializeProfile(
     accountLogin: profile.accountLogin ?? '',
     weeklyDropDone: Boolean(profile.weeklyDropDone),
     weeklyDropDoneAt: profile.weeklyDropDoneAt?.toISOString() ?? null,
-    steamLevel: profile.steamLevel ?? null,
     cs2Hours: profile.cs2Hours ?? null,
     cs2PremierRating: profile.cs2PremierRating ?? null,
     cs2ProfileRank: profile.cs2ProfileRank ?? null,
     cs2ProfileXp: profile.cs2ProfileXp ?? null,
     cs2WingmanRank: profile.cs2WingmanRank ?? null,
     cs2StatsSyncedAt: profile.cs2StatsSyncedAt?.toISOString() ?? null,
+    cs2AuthConnected: Boolean(profile.cs2AuthToken),
+    cs2AuthConnectedAt: profile.cs2AuthConnectedAt?.toISOString() ?? null,
     active: profile.active,
     profileUrl: profile.vanityUrl
       ? `https://steamcommunity.com/id/${profile.vanityUrl}`
@@ -155,6 +158,7 @@ export class GamesService {
     private readonly configService: ConfigService,
     private readonly botService: BotService,
     private readonly appsService: AppsService,
+    private readonly steamGcService: SteamGcService,
   ) {}
 
   private steamApiKey() {
@@ -398,6 +402,30 @@ export class GamesService {
     }
   }
 
+  async startCs2Auth(userId: number, profileId: string) {
+    return this.steamGcService.startQrLogin(userId, profileId);
+  }
+
+  async cs2AuthStatus(userId: number, profileId: string) {
+    return this.steamGcService.getQrLoginStatus(userId, profileId);
+  }
+
+  async disconnectCs2Auth(userId: number, profileId: string) {
+    return this.steamGcService.disconnect(userId, profileId);
+  }
+
+  async syncCs2Auth(userId: number, profileId: string) {
+    const profile = await this.prisma.steamProfile.findFirst({
+      where: { id: profileId, userId: BigInt(userId) },
+      select: { id: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Аккаунт не найден');
+    }
+    await this.steamGcService.syncProfile(profile.id);
+    return this.overview(userId);
+  }
+
   async setWeeklyDrop(userId: number, profileId: string, done: boolean) {
     try {
       const profile = await this.prisma.steamProfile.findFirst({
@@ -617,7 +645,7 @@ export class GamesService {
     });
 
     try {
-      await this.syncCs2Stats(profile.id, profile.steamId, profile.vanityUrl);
+      await this.syncCs2Stats(profile.id, profile.steamId);
     } catch {
       //
     }
@@ -632,23 +660,30 @@ export class GamesService {
   private async syncCs2Stats(
     profileId: string,
     steamId: string,
-    vanityUrl?: string | null,
   ) {
+    let gcStats = null;
+    try {
+      gcStats = await this.steamGcService.syncProfile(profileId);
+    } catch {
+      gcStats = null;
+    }
     const stats = await fetchCs2AccountStats(steamId, this.steamApiKey(), {
-      vanityUrl,
       cs2SpaceApiKey: this.cs2SpaceApiKey(),
     });
     await this.prisma.steamProfile.update({
       where: { id: profileId },
-      data: {
-        steamLevel: stats.steamLevel,
-        cs2Hours: stats.cs2Hours,
-        cs2PremierRating: stats.cs2PremierRating,
-        cs2ProfileRank: stats.cs2ProfileRank,
-        cs2ProfileXp: stats.cs2ProfileXp,
-        cs2WingmanRank: stats.cs2WingmanRank,
-        cs2StatsSyncedAt: new Date(),
-      },
+      data: gcStats
+        ? {
+            ...(stats.cs2Hours != null ? { cs2Hours: stats.cs2Hours } : {}),
+          }
+        : {
+            cs2Hours: stats.cs2Hours,
+            cs2PremierRating: stats.cs2PremierRating,
+            cs2ProfileRank: stats.cs2ProfileRank,
+            cs2ProfileXp: stats.cs2ProfileXp,
+            cs2WingmanRank: stats.cs2WingmanRank,
+            cs2StatsSyncedAt: new Date(),
+          },
     });
   }
 

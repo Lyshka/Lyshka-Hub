@@ -189,13 +189,14 @@ export type SteamProfile = {
   accountLogin: string;
   weeklyDropDone: boolean;
   weeklyDropDoneAt: string | null;
-  steamLevel: number | null;
   cs2Hours: number | null;
   cs2PremierRating: number | null;
   cs2ProfileRank: number | null;
   cs2ProfileXp: number | null;
   cs2WingmanRank: number | null;
   cs2StatsSyncedAt: string | null;
+  cs2AuthConnected: boolean;
+  cs2AuthConnectedAt: string | null;
   active: boolean;
   profileUrl: string;
   lastSyncAt: string | null;
@@ -229,6 +230,13 @@ export type GamesOverview = {
   };
   owned: SteamGame[];
   missing: SteamGame[];
+};
+
+export type Cs2AuthStatus = {
+  state: 'idle' | 'waiting' | 'scanned' | 'connecting' | 'connected' | 'expired' | 'failed';
+  qrDataUrl: string | null;
+  expiresAt: string | null;
+  message: string | null;
 };
 
 export type InventoryItem = {
@@ -581,6 +589,26 @@ export const api = {
     request<GamesOverview>('/api/games/update', {
       method: 'POST',
       body: JSON.stringify({ initData, ...data }),
+    }),
+  gamesCs2AuthStart: (initData: string, profileId: string) =>
+    request<Cs2AuthStatus>('/api/games/cs2-auth/start', {
+      method: 'POST',
+      body: JSON.stringify({ initData, profileId }),
+    }),
+  gamesCs2AuthStatus: (initData: string, profileId: string) =>
+    request<Cs2AuthStatus>('/api/games/cs2-auth/status', {
+      method: 'POST',
+      body: JSON.stringify({ initData, profileId }),
+    }),
+  gamesCs2AuthDisconnect: (initData: string, profileId: string) =>
+    request<Cs2AuthStatus>('/api/games/cs2-auth/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ initData, profileId }),
+    }),
+  gamesCs2AuthSync: (initData: string, profileId: string) =>
+    request<GamesOverview>('/api/games/cs2-auth/sync', {
+      method: 'POST',
+      body: JSON.stringify({ initData, profileId }),
     }),
   gamesWeeklyDrop: (initData: string, profileId: string, done: boolean) =>
     request<GamesOverview>('/api/games/weekly-drop', {

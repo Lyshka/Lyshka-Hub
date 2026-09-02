@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   api,
+  type Cs2AuthStatus,
   type GamesOverview,
   type InventoryItem,
   type InventoryOverview,
@@ -203,20 +204,7 @@ function Cs2StatsRow({ profile }: { profile: SteamProfile }) {
         </p>
       </div>
       <div
-        className="rounded-2xl px-3 py-2.5"
-        style={{
-          background: 'color-mix(in srgb, var(--app-surface) 72%, transparent)',
-        }}
-      >
-        <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--tg-hint)' }}>
-          Steam LVL
-        </p>
-        <p className="mt-1 text-sm font-semibold">
-          {profile.steamLevel != null ? profile.steamLevel : '—'}
-        </p>
-      </div>
-      <div
-        className="rounded-2xl px-3 py-2.5"
+        className="col-span-2 rounded-2xl px-3 py-2.5"
         style={{
           background: 'color-mix(in srgb, var(--app-surface) 72%, transparent)',
         }}
@@ -227,11 +215,185 @@ function Cs2StatsRow({ profile }: { profile: SteamProfile }) {
         <p className="mt-1 text-sm font-semibold">{formatHours(profile.cs2Hours)}</p>
       </div>
       <p className="col-span-2 px-1 text-[11px]" style={{ color: 'var(--tg-hint)' }}>
-        Авто · Steam + Leetify
-        {profile.cs2PremierRating != null ? ' + Premier' : ''} ·{' '}
-        {formatSync(profile.cs2StatsSyncedAt)}
+        Обновлено · {formatSync(profile.cs2StatsSyncedAt)}
       </p>
     </div>
+  );
+}
+
+function Cs2AuthPanel({
+  profile,
+  initData,
+  onChanged,
+}: {
+  profile: SteamProfile;
+  initData: string;
+  onChanged: () => void;
+}) {
+  const [session, setSession] = useState<Cs2AuthStatus | null>(null);
+  const [pending, setPending] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await api.gamesCs2AuthStatus(initData, profile.id);
+      setSession(next);
+      if (next.state === 'connected') {
+        onChanged();
+      }
+    } catch {
+      setSession({
+        state: 'failed',
+        qrDataUrl: null,
+        expiresAt: null,
+        message: 'Не удалось проверить подключение Steam',
+      });
+    }
+  }, [initData, onChanged, profile.id]);
+
+  useEffect(() => {
+    if (
+      session?.state !== 'waiting' &&
+      session?.state !== 'scanned' &&
+      session?.state !== 'connecting'
+    ) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [refresh, session?.state]);
+
+  async function start() {
+    setPending(true);
+    try {
+      const next = await api.gamesCs2AuthStart(initData, profile.id);
+      setSession(next);
+      if (next.state === 'connected') {
+        onChanged();
+      }
+    } catch (err) {
+      setSession({
+        state: 'failed',
+        qrDataUrl: null,
+        expiresAt: null,
+        message: err instanceof Error ? err.message : 'Не удалось создать QR-код',
+      });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function sync() {
+    setPending(true);
+    try {
+      await api.gamesCs2AuthSync(initData, profile.id);
+      await refresh();
+      onChanged();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function disconnect() {
+    setPending(true);
+    try {
+      const next = await api.gamesCs2AuthDisconnect(initData, profile.id);
+      setSession(next);
+      onChanged();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const awaiting = Boolean(session?.qrDataUrl);
+  const canRetry =
+    session?.state === 'failed' || session?.state === 'expired';
+
+  return (
+    <section
+      className="mt-3 rounded-2xl px-3 py-3"
+      style={{
+        background: 'color-mix(in srgb, #66c0f4 12%, var(--app-surface))',
+      }}
+    >
+      {profile.cs2AuthConnected ? (
+        <>
+          <p className="text-sm font-semibold">Steam подключён для CS2</p>
+          <p className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
+            Опыт и Premier получаем из CS2 напрямую
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => void sync()}
+              className="flex-1 rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
+              style={{ background: '#2a475e', color: '#c7d5e0' }}
+            >
+              Обновить CS2
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => void disconnect()}
+              className="rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
+              style={{
+                background: 'color-mix(in srgb, var(--app-danger) 14%, transparent)',
+                color: 'var(--app-danger)',
+              }}
+            >
+              Отключить
+            </button>
+          </div>
+        </>
+      ) : awaiting ? (
+        <div className="text-center">
+          <p className="text-sm font-semibold">Подключение Steam</p>
+          <p className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
+            {session?.message ?? 'Отсканируй QR-код приложением Steam'}
+          </p>
+          <img
+            src={session?.qrDataUrl ?? ''}
+            alt="QR-код Steam"
+            className="mx-auto mt-3 h-48 w-48 rounded-xl bg-white p-2"
+          />
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => void disconnect()}
+            className="mt-3 rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
+            style={{
+              background: 'color-mix(in srgb, var(--app-danger) 14%, transparent)',
+              color: 'var(--app-danger)',
+            }}
+          >
+            Отмена
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="text-sm font-semibold">Точный опыт и Premier CS2</p>
+          <p className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
+            Подключи аккаунт через Steam Guard без ввода пароля
+          </p>
+          {canRetry && session?.message ? (
+            <p className="mt-2 text-xs" style={{ color: 'var(--app-danger)' }}>
+              {session.message}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => void start()}
+            className="mt-3 w-full rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
+            style={{ background: '#2a475e', color: '#c7d5e0' }}
+          >
+            {canRetry ? 'Создать новый QR-код' : 'Подключить Steam'}
+          </button>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -583,9 +745,11 @@ export function GamesApp({ onBack }: GamesAppProps) {
                       key={profile.id}
                       profile={profile}
                       busy={busy}
+                      initData={initData}
                       onSelect={() => void selectAccount(profile.id)}
                       onDelete={() => void deleteAccount(profile.id)}
                       onUpdate={(meta) => void updateAccount(profile.id, meta)}
+                      onCs2Changed={() => void load()}
                       onToggleDrop={(done) =>
                         void toggleWeeklyDrop(profile.id, done)
                       }
@@ -1003,19 +1167,23 @@ function WeeklyDropPanel({
 function AccountCard({
   profile,
   busy,
+  initData,
   onSelect,
   onDelete,
   onUpdate,
+  onCs2Changed,
   onToggleDrop,
 }: {
   profile: SteamProfile;
   busy: boolean;
+  initData: string;
   onSelect: () => void;
   onDelete: () => void;
   onUpdate: (meta: {
     accountEmail?: string;
     accountLogin?: string;
   }) => void;
+  onCs2Changed: () => void;
   onToggleDrop: (done: boolean) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -1059,6 +1227,11 @@ function AccountCard({
       </div>
 
       <Cs2StatsRow profile={profile} />
+      <Cs2AuthPanel
+        profile={profile}
+        initData={initData}
+        onChanged={onCs2Changed}
+      />
 
       <button
         type="button"
