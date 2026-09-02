@@ -161,6 +161,10 @@ export class GamesService {
     return this.configService.get<string>('STEAM_API_KEY')?.trim() ?? '';
   }
 
+  private cs2SpaceApiKey() {
+    return this.configService.get<string>('CS2_SPACE_API_KEY')?.trim() ?? '';
+  }
+
   private normalizeAccountFields(data?: {
     accountEmail?: string;
     accountLogin?: string;
@@ -613,7 +617,7 @@ export class GamesService {
     });
 
     try {
-      await this.syncCs2Stats(profile.id, profile.steamId);
+      await this.syncCs2Stats(profile.id, profile.steamId, profile.vanityUrl);
     } catch {
       //
     }
@@ -625,8 +629,15 @@ export class GamesService {
     }
   }
 
-  private async syncCs2Stats(profileId: string, steamId: string) {
-    const stats = await fetchCs2AccountStats(steamId, this.steamApiKey());
+  private async syncCs2Stats(
+    profileId: string,
+    steamId: string,
+    vanityUrl?: string | null,
+  ) {
+    const stats = await fetchCs2AccountStats(steamId, this.steamApiKey(), {
+      vanityUrl,
+      cs2SpaceApiKey: this.cs2SpaceApiKey(),
+    });
     await this.prisma.steamProfile.update({
       where: { id: profileId },
       data: {

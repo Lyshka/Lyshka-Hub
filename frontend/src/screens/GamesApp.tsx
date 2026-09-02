@@ -227,7 +227,9 @@ function Cs2StatsRow({ profile }: { profile: SteamProfile }) {
         <p className="mt-1 text-sm font-semibold">{formatHours(profile.cs2Hours)}</p>
       </div>
       <p className="col-span-2 px-1 text-[11px]" style={{ color: 'var(--tg-hint)' }}>
-        Авто · Leetify + Steam · {formatSync(profile.cs2StatsSyncedAt)}
+        Авто · Steam + Leetify
+        {profile.cs2PremierRating != null ? ' + Premier' : ''} ·{' '}
+        {formatSync(profile.cs2StatsSyncedAt)}
       </p>
     </div>
   );
