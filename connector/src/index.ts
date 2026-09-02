@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { execFile } from 'child_process';
-import NodeCS2 = require('node-cs2');
+import NodeCS2 from 'node-cs2';
 import QRCode from 'qrcode';
 import { EAuthTokenPlatformType, LoginSession } from 'steam-session';
-import SteamUser = require('steam-user');
+import SteamUser from 'steam-user';
 
 const PORT = 18734;
 const CS2_XP_BASE = 327680000;
