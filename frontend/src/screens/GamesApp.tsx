@@ -277,23 +277,17 @@ function Cs2LocalConnectorPanel({
     }
   }
 
-  async function copyCommand() {
+  async function copyCode() {
     if (!update || !navigator.clipboard) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(
-        `npm --prefix connector install; npm run cs2:connector -- --url ${window.location.origin} --code ${update.code}`,
-      );
+      await navigator.clipboard.writeText(update.code);
       setCopied(true);
     } catch {
       setCopied(false);
     }
   }
-
-  const command = update
-    ? `npm --prefix connector install; npm run cs2:connector -- --url ${window.location.origin} --code ${update.code}`
-    : '';
 
   return (
     <section
@@ -306,22 +300,34 @@ function Cs2LocalConnectorPanel({
         <>
           <p className="text-sm font-semibold">Обновление через ПК</p>
           <p className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
-            Запусти эту команду в PowerShell на домашнем ПК, затем отсканируй QR-код Steam.
+            На домашнем ПК дважды нажми start-cs2-connector.cmd. В открывшемся браузере введи адрес и код ниже.
+          </p>
+          <p className="mt-3 text-xs" style={{ color: 'var(--tg-hint)' }}>
+            Адрес Lyshka Hub
+          </p>
+          <input
+            readOnly
+            value={window.location.origin}
+            className="mt-1 w-full rounded-xl border-0 px-3 py-2 text-xs outline-none"
+            style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
+          />
+          <p className="mt-2 text-xs" style={{ color: 'var(--tg-hint)' }}>
+            Одноразовый код
           </p>
           <textarea
             readOnly
-            value={command}
-            className="mt-3 min-h-20 w-full resize-none rounded-xl border-0 px-3 py-2 text-xs outline-none"
+            value={update.code}
+            className="mt-1 min-h-14 w-full resize-none rounded-xl border-0 px-3 py-2 text-xs outline-none"
             style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
           />
           <button
             type="button"
             disabled={pending}
-            onClick={() => void copyCommand()}
+            onClick={() => void copyCode()}
             className="mt-2 w-full rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
             style={{ background: '#2a475e', color: '#c7d5e0' }}
           >
-            {copied ? 'Команда скопирована' : 'Скопировать команду'}
+            {copied ? 'Код скопирован' : 'Скопировать код'}
           </button>
           <p className="mt-2 text-xs" style={{ color: 'var(--tg-hint)' }}>
             Код действует до {formatSync(update.expiresAt)}

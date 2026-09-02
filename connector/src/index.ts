@@ -1,8 +1,11 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import { execFile } from 'child_process';
 import NodeCS2 = require('node-cs2');
-import { generate } from 'qrcode-terminal';
+import QRCode from 'qrcode';
 import { EAuthTokenPlatformType, LoginSession } from 'steam-session';
 import SteamUser = require('steam-user');
 
+const PORT = 18734;
 const CS2_XP_BASE = 327680000;
 const CS2_XP_LEVEL_SIZE = 5000;
 
@@ -23,10 +26,21 @@ type Cs2Stats = {
   cs2WingmanRank?: number;
 };
 
-function argument(name: string) {
-  const index = process.argv.indexOf(name);
-  const value = index === -1 ? null : process.argv[index + 1];
-  return value?.trim() || null;
+type ConnectorState = {
+  status: 'idle' | 'creating' | 'waiting' | 'scanned' | 'connecting' | 'completed' | 'failed';
+  message: string;
+  qrDataUrl: string | null;
+};
+
+let state: ConnectorState = {
+  status: 'idle',
+  message: 'Вставь адрес сервера и код из Lyshka Hub',
+  qrDataUrl: null,
+};
+let activeSession: LoginSession | null = null;
+
+function setState(next: ConnectorState) {
+  state = next;
 }
 
 function asInteger(value: unknown, allowZero = false) {
@@ -147,65 +161,256 @@ async function submitStats(
   }
 }
 
-async function run() {
-  const baseUrl = argument('--url');
-  const code = argument('--code');
-  if (!baseUrl || !code || !/^https:\/\//i.test(baseUrl)) {
-    process.exitCode = 1;
+function stopActiveSession() {
+  if (!activeSession) {
     return;
   }
+  activeSession.cancelLoginAttempt();
+  activeSession = null;
+}
 
+async function beginLogin(baseUrl: string, code: string) {
+  stopActiveSession();
   const session = new LoginSession(EAuthTokenPlatformType.SteamClient, {
     machineId: true,
     machineFriendlyName: 'Lyshka Hub Connector',
   });
+  activeSession = session;
   session.loginTimeout = 180000;
+  setState({
+    status: 'creating',
+    message: 'Создаём QR-код Steam',
+    qrDataUrl: null,
+  });
 
-  let complete = false;
-  const stop = (failed: boolean) => {
-    if (complete) {
+  session.on('remoteInteraction', () => {
+    setState({
+      status: 'scanned',
+      message: 'Подтверди вход в Steam Guard',
+      qrDataUrl: state.qrDataUrl,
+    });
+  });
+  session.on('timeout', () => {
+    if (activeSession !== session) {
       return;
     }
-    complete = true;
-    session.cancelLoginAttempt();
-    process.exitCode = failed ? 1 : 0;
-  };
-
-  session.on('timeout', () => stop(true));
-  session.on('error', () => stop(true));
+    activeSession = null;
+    setState({
+      status: 'failed',
+      message: 'Время QR-кода истекло',
+      qrDataUrl: null,
+    });
+  });
+  session.on('error', () => {
+    if (activeSession !== session) {
+      return;
+    }
+    activeSession = null;
+    setState({
+      status: 'failed',
+      message: 'Steam не подтвердил вход',
+      qrDataUrl: null,
+    });
+  });
   session.on('authenticated', () => {
     void (async () => {
       try {
         const steamId = session.steamID.getSteamID64();
         const refreshToken = session.refreshToken;
         if (!steamId || !refreshToken) {
-          stop(true);
-          return;
+          throw new Error();
         }
+        setState({
+          status: 'connecting',
+          message: 'Получаем актуальные данные CS2',
+          qrDataUrl: null,
+        });
         const profile = await requestProfile(refreshToken, steamId);
         const stats = parseStats(profile);
         if (!stats) {
-          stop(true);
-          return;
+          throw new Error();
         }
         await submitStats(baseUrl, code, steamId, stats);
-        stop(false);
+        if (activeSession === session) {
+          activeSession = null;
+        }
+        setState({
+          status: 'completed',
+          message: 'Данные CS2 отправлены в Lyshka Hub',
+          qrDataUrl: null,
+        });
       } catch {
-        stop(true);
+        if (activeSession === session) {
+          activeSession = null;
+        }
+        setState({
+          status: 'failed',
+          message: 'Не удалось получить или отправить данные CS2',
+          qrDataUrl: null,
+        });
       }
     })();
   });
 
   try {
     const started = await session.startWithQR();
-    if (!started.qrChallengeUrl) {
-      stop(true);
+    if (!started.qrChallengeUrl || activeSession !== session) {
+      throw new Error();
+    }
+    const qrDataUrl = await QRCode.toDataURL(started.qrChallengeUrl, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 320,
+    });
+    if (activeSession !== session) {
       return;
     }
-    generate(started.qrChallengeUrl, { small: true });
+    setState({
+      status: 'waiting',
+      message: 'Открой Steam Guard и отсканируй QR-код',
+      qrDataUrl,
+    });
   } catch {
-    stop(true);
+    if (activeSession === session) {
+      activeSession = null;
+    }
+    setState({
+      status: 'failed',
+      message: 'Не удалось создать QR-код Steam',
+      qrDataUrl: null,
+    });
   }
 }
 
-void run();
+async function readJson(request: IncomingMessage) {
+  let body = '';
+  for await (const chunk of request) {
+    body += String(chunk);
+    if (body.length > 4096) {
+      throw new Error();
+    }
+  }
+  return JSON.parse(body) as { serverUrl?: unknown; code?: unknown };
+}
+
+function sendJson(response: ServerResponse, body: unknown, status = 200) {
+  response.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  response.end(JSON.stringify(body));
+}
+
+function page() {
+  return `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyshka Hub CS2</title>
+<style>
+body{margin:0;background:#101820;color:#e8f1f5;font:16px system-ui,sans-serif}
+main{max-width:420px;margin:0 auto;padding:28px 18px}
+h1{font-size:24px;margin:0 0 8px}
+p{color:#9fb1bd;line-height:1.45}
+label{display:block;margin:18px 0 7px;font-size:14px;color:#b9c8d1}
+input,button{box-sizing:border-box;width:100%;border-radius:12px;font:inherit}
+input{border:1px solid #38505e;background:#18252e;color:#e8f1f5;padding:12px}
+button{border:0;background:#5fa8d3;color:#071218;font-weight:700;padding:13px;margin-top:16px;cursor:pointer}
+#card{margin-top:22px;padding:18px;border-radius:16px;background:#18252e;text-align:center}
+#qr{display:none;width:260px;height:260px;margin:16px auto 0;background:#fff;padding:10px;border-radius:12px;box-sizing:border-box}
+#state{margin:0;color:#d6e4ea}
+</style>
+</head>
+<body>
+<main>
+<h1>Обновление CS2</h1>
+<p>Вставь адрес и одноразовый код из Lyshka Hub. Steam откроется только с этого компьютера.</p>
+<form id="form">
+<label for="url">Адрес Lyshka Hub</label>
+<input id="url" type="url" required placeholder="https://example.duckdns.org">
+<label for="code">Одноразовый код</label>
+<input id="code" required autocomplete="off">
+<button type="submit">Показать QR-код Steam</button>
+</form>
+<section id="card">
+<p id="state">Вставь данные для подключения</p>
+<img id="qr" alt="QR-код Steam">
+</section>
+</main>
+<script>
+const form=document.getElementById('form');
+const url=document.getElementById('url');
+const code=document.getElementById('code');
+const state=document.getElementById('state');
+const qr=document.getElementById('qr');
+url.value=localStorage.getItem('lyshka-server-url')||'';
+async function refresh(){
+  const response=await fetch('/status',{cache:'no-store'});
+  const data=await response.json();
+  state.textContent=data.message;
+  if(data.qrDataUrl){
+    qr.src=data.qrDataUrl;
+    qr.style.display='block';
+  }else{
+    qr.removeAttribute('src');
+    qr.style.display='none';
+  }
+}
+form.addEventListener('submit',async(event)=>{
+  event.preventDefault();
+  localStorage.setItem('lyshka-server-url',url.value.trim());
+  await fetch('/start',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({serverUrl:url.value.trim(),code:code.value.trim()})
+  });
+  code.value='';
+  await refresh();
+});
+setInterval(()=>void refresh(),1000);
+void refresh();
+</script>
+</body>
+</html>`;
+}
+
+const server = createServer((request, response) => {
+  if (request.method === 'GET' && request.url === '/') {
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    response.end(page());
+    return;
+  }
+  if (request.method === 'GET' && request.url === '/status') {
+    sendJson(response, state);
+    return;
+  }
+  if (request.method === 'POST' && request.url === '/start') {
+    void readJson(request)
+      .then((body) => {
+        const serverUrl =
+          typeof body.serverUrl === 'string' ? body.serverUrl.trim() : '';
+        const code = typeof body.code === 'string' ? body.code.trim() : '';
+        if (!/^https:\/\//i.test(serverUrl) || code.length < 40) {
+          sendJson(response, { ok: false }, 400);
+          return;
+        }
+        void beginLogin(serverUrl, code);
+        sendJson(response, { ok: true });
+      })
+      .catch(() => sendJson(response, { ok: false }, 400));
+    return;
+  }
+  sendJson(response, { ok: false }, 404);
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  execFile(
+    'cmd.exe',
+    ['/c', 'start', '', `http://127.0.0.1:${PORT}`],
+    () => undefined,
+  );
+});
