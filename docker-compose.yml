@@ -26,7 +26,7 @@ services:
     environment:
       PORT: 3000
       DATABASE_URL: postgresql://lyshka:lyshka@db:5432/lyshka?schema=public
-      WEBAPP_URL: ""
+      WEBAPP_URL: ${WEBAPP_URL:-}
       WEBAPP_URL_FILE: /shared/webapp_url
       CORS_ORIGIN: "*"
       ALLOW_DEV_AUTH: "false"
@@ -57,8 +57,18 @@ services:
     environment:
       TUNNEL_TARGET: http://frontend:80
       WEBAPP_URL_FILE: /shared/webapp_url
+      TUNNEL_HEALTH_FILE: /shared/tunnel_ok
+      WEBAPP_URL: ${WEBAPP_URL:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TUNNEL_DISABLED: ${TUNNEL_DISABLED:-}
     volumes:
       - webapp_shared:/shared
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /shared/tunnel_ok && test -s /shared/webapp_url"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
     depends_on:
       - frontend
 

@@ -27,18 +27,29 @@ export class BotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  getWebAppUrl(appSlug?: string): string | null {
-    const fromFile = this.readUrlFromFile();
-    if (fromFile) {
-      this.cachedUrl = fromFile.replace(/\/$/, '');
-      return this.withParams(this.cachedUrl, appSlug);
+  private resolveWebAppUrlRaw(): string | null {
+    const filePath = this.configService.get<string>('WEBAPP_URL_FILE');
+    if (filePath) {
+      const fromFile = this.readUrlFromFile();
+      if (fromFile) {
+        return fromFile.replace(/\/$/, '');
+      }
+      return null;
     }
 
     const fromEnv = this.configService.get<string>('WEBAPP_URL')?.trim();
     if (!fromEnv) {
-      return this.cachedUrl ? this.withParams(this.cachedUrl, appSlug) : null;
+      return null;
     }
-    this.cachedUrl = fromEnv.replace(/\/$/, '');
+    return fromEnv.replace(/\/$/, '');
+  }
+
+  getWebAppUrl(appSlug?: string): string | null {
+    const nextRaw = this.resolveWebAppUrlRaw();
+    if (!nextRaw) {
+      return null;
+    }
+    this.cachedUrl = nextRaw;
     return this.withParams(this.cachedUrl, appSlug);
   }
 
@@ -99,11 +110,12 @@ export class BotService implements OnModuleInit, OnModuleDestroy {
 
   private async syncWebAppUrl() {
     const previous = this.cachedUrl;
-    const fromFile = this.readUrlFromFile();
-    const fromEnv = this.configService.get<string>('WEBAPP_URL')?.trim();
-    const nextRaw = (fromFile || fromEnv || '')?.replace(/\/$/, '') || null;
-    if (nextRaw && nextRaw !== previous) {
-      this.cachedUrl = nextRaw;
+    const nextRaw = this.resolveWebAppUrlRaw();
+    if (nextRaw === previous) {
+      return;
+    }
+    this.cachedUrl = nextRaw;
+    if (nextRaw) {
       await this.applyMenuButton();
     }
   }
