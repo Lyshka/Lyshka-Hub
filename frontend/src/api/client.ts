@@ -195,8 +195,7 @@ export type SteamProfile = {
   cs2ProfileXp: number | null;
   cs2WingmanRank: number | null;
   cs2StatsSyncedAt: string | null;
-  cs2AuthConnected: boolean;
-  cs2AuthConnectedAt: string | null;
+  cs2ExactSyncedAt: string | null;
   active: boolean;
   profileUrl: string;
   lastSyncAt: string | null;
@@ -232,11 +231,14 @@ export type GamesOverview = {
   missing: SteamGame[];
 };
 
-export type Cs2AuthStatus = {
-  state: 'idle' | 'waiting' | 'scanned' | 'connecting' | 'connected' | 'expired' | 'failed';
-  qrDataUrl: string | null;
+export type Cs2LocalUpdate = {
+  code: string;
+  expiresAt: string;
+};
+
+export type Cs2LocalUpdateStatus = {
+  state: 'idle' | 'waiting' | 'completed' | 'expired';
   expiresAt: string | null;
-  message: string | null;
 };
 
 export type InventoryItem = {
@@ -590,23 +592,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ initData, ...data }),
     }),
-  gamesCs2AuthStart: (initData: string, profileId: string) =>
-    request<Cs2AuthStatus>('/api/games/cs2-auth/start', {
+  gamesCs2LocalStart: (initData: string, profileId: string) =>
+    request<Cs2LocalUpdate>('/api/games/cs2-local/start', {
       method: 'POST',
       body: JSON.stringify({ initData, profileId }),
     }),
-  gamesCs2AuthStatus: (initData: string, profileId: string) =>
-    request<Cs2AuthStatus>('/api/games/cs2-auth/status', {
-      method: 'POST',
-      body: JSON.stringify({ initData, profileId }),
-    }),
-  gamesCs2AuthDisconnect: (initData: string, profileId: string) =>
-    request<Cs2AuthStatus>('/api/games/cs2-auth/disconnect', {
-      method: 'POST',
-      body: JSON.stringify({ initData, profileId }),
-    }),
-  gamesCs2AuthSync: (initData: string, profileId: string) =>
-    request<GamesOverview>('/api/games/cs2-auth/sync', {
+  gamesCs2LocalStatus: (initData: string, profileId: string) =>
+    request<Cs2LocalUpdateStatus>('/api/games/cs2-local/status', {
       method: 'POST',
       body: JSON.stringify({ initData, profileId }),
     }),

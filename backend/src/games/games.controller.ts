@@ -1,6 +1,7 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { AuthService } from '../auth/auth.service';
 import {
+  Cs2ConnectorSubmitDto,
   GamesInitDto,
   GamesLinkDto,
   GamesProfileDto,
@@ -49,40 +50,27 @@ export class GamesController {
     });
   }
 
-  @Post('cs2-auth/start')
-  async startCs2Auth(@Body() dto: GamesProfileDto) {
+  @Post('cs2-local/start')
+  async startCs2LocalUpdate(@Body() dto: GamesProfileDto) {
     const session = await this.authService.authenticateApp(
       dto.initData ?? '',
       'games',
     );
-    return this.gamesService.startCs2Auth(session.user.id, dto.profileId);
+    return this.gamesService.startCs2LocalUpdate(session.user.id, dto.profileId);
   }
 
-  @Post('cs2-auth/status')
-  async cs2AuthStatus(@Body() dto: GamesProfileDto) {
+  @Post('cs2-local/status')
+  async cs2LocalUpdateStatus(@Body() dto: GamesProfileDto) {
     const session = await this.authService.authenticateApp(
       dto.initData ?? '',
       'games',
     );
-    return this.gamesService.cs2AuthStatus(session.user.id, dto.profileId);
+    return this.gamesService.cs2LocalUpdateStatus(session.user.id, dto.profileId);
   }
 
-  @Post('cs2-auth/disconnect')
-  async disconnectCs2Auth(@Body() dto: GamesProfileDto) {
-    const session = await this.authService.authenticateApp(
-      dto.initData ?? '',
-      'games',
-    );
-    return this.gamesService.disconnectCs2Auth(session.user.id, dto.profileId);
-  }
-
-  @Post('cs2-auth/sync')
-  async syncCs2Auth(@Body() dto: GamesProfileDto) {
-    const session = await this.authService.authenticateApp(
-      dto.initData ?? '',
-      'games',
-    );
-    return this.gamesService.syncCs2Auth(session.user.id, dto.profileId);
+  @Post('cs2-local/submit')
+  async submitCs2LocalUpdate(@Body() dto: Cs2ConnectorSubmitDto) {
+    return this.gamesService.submitCs2LocalUpdate(dto);
   }
 
   @Post('weekly-drop')

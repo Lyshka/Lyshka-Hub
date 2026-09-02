@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   api,
-  type Cs2AuthStatus,
+  type Cs2LocalUpdate,
+  type Cs2LocalUpdateStatus,
   type GamesOverview,
   type InventoryItem,
   type InventoryOverview,
@@ -163,7 +164,7 @@ function formatHours(value: number | null | undefined) {
 
 function formatCs2Experience(profile: SteamProfile) {
   if (profile.cs2ProfileRank != null && profile.cs2ProfileXp != null) {
-    return `Ур. ${profile.cs2ProfileRank} · ${profile.cs2ProfileXp.toLocaleString('ru-RU')} XP`;
+    return `Ур. ${profile.cs2ProfileRank} · ${profile.cs2ProfileXp.toLocaleString('ru-RU')} / 5 000 XP`;
   }
   if (profile.cs2ProfileRank != null) {
     return `Ур. ${profile.cs2ProfileRank}`;
@@ -221,7 +222,7 @@ function Cs2StatsRow({ profile }: { profile: SteamProfile }) {
   );
 }
 
-function Cs2AuthPanel({
+function Cs2LocalConnectorPanel({
   profile,
   initData,
   onChanged,
@@ -230,85 +231,69 @@ function Cs2AuthPanel({
   initData: string;
   onChanged: () => void;
 }) {
-  const [session, setSession] = useState<Cs2AuthStatus | null>(null);
+  const [update, setUpdate] = useState<Cs2LocalUpdate | null>(null);
+  const [status, setStatus] =
+    useState<Cs2LocalUpdateStatus['state']>('idle');
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const next = await api.gamesCs2AuthStatus(initData, profile.id);
-      setSession(next);
-      if (next.state === 'connected') {
+      const next = await api.gamesCs2LocalStatus(initData, profile.id);
+      setStatus(next.state);
+      if (next.state === 'completed') {
         onChanged();
       }
     } catch {
-      setSession({
-        state: 'failed',
-        qrDataUrl: null,
-        expiresAt: null,
-        message: 'Не удалось проверить подключение Steam',
-      });
+      setError('Не удалось проверить обновление CS2');
     }
   }, [initData, onChanged, profile.id]);
 
   useEffect(() => {
-    if (
-      session?.state !== 'waiting' &&
-      session?.state !== 'scanned' &&
-      session?.state !== 'connecting'
-    ) {
+    if (!update || status !== 'waiting') {
       return;
     }
     const timer = window.setInterval(() => {
       void refresh();
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [refresh, session?.state]);
+  }, [refresh, status, update]);
 
   async function start() {
     setPending(true);
+    setError(null);
+    setCopied(false);
     try {
-      const next = await api.gamesCs2AuthStart(initData, profile.id);
-      setSession(next);
-      if (next.state === 'connected') {
-        onChanged();
-      }
+      const next = await api.gamesCs2LocalStart(initData, profile.id);
+      setUpdate(next);
+      setStatus('waiting');
     } catch (err) {
-      setSession({
-        state: 'failed',
-        qrDataUrl: null,
-        expiresAt: null,
-        message: err instanceof Error ? err.message : 'Не удалось создать QR-код',
-      });
+      setError(
+        err instanceof Error ? err.message : 'Не удалось подготовить обновление',
+      );
     } finally {
       setPending(false);
     }
   }
 
-  async function sync() {
-    setPending(true);
+  async function copyCommand() {
+    if (!update || !navigator.clipboard) {
+      return;
+    }
     try {
-      await api.gamesCs2AuthSync(initData, profile.id);
-      await refresh();
-      onChanged();
-    } finally {
-      setPending(false);
+      await navigator.clipboard.writeText(
+        `npm --prefix connector install; npm run cs2:connector -- --url ${window.location.origin} --code ${update.code}`,
+      );
+      setCopied(true);
+    } catch {
+      setCopied(false);
     }
   }
 
-  async function disconnect() {
-    setPending(true);
-    try {
-      const next = await api.gamesCs2AuthDisconnect(initData, profile.id);
-      setSession(next);
-      onChanged();
-    } finally {
-      setPending(false);
-    }
-  }
-
-  const awaiting = Boolean(session?.qrDataUrl);
-  const canRetry =
-    session?.state === 'failed' || session?.state === 'expired';
+  const command = update
+    ? `npm --prefix connector install; npm run cs2:connector -- --url ${window.location.origin} --code ${update.code}`
+    : '';
 
   return (
     <section
@@ -317,69 +302,61 @@ function Cs2AuthPanel({
         background: 'color-mix(in srgb, #66c0f4 12%, var(--app-surface))',
       }}
     >
-      {profile.cs2AuthConnected ? (
+      {status === 'waiting' && update ? (
         <>
-          <p className="text-sm font-semibold">Steam подключён для CS2</p>
+          <p className="text-sm font-semibold">Обновление через ПК</p>
           <p className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
-            Опыт и Premier получаем из CS2 напрямую
+            Запусти эту команду в PowerShell на домашнем ПК, затем отсканируй QR-код Steam.
           </p>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void sync()}
-              className="flex-1 rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
-              style={{ background: '#2a475e', color: '#c7d5e0' }}
-            >
-              Обновить CS2
-            </button>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void disconnect()}
-              className="rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
-              style={{
-                background: 'color-mix(in srgb, var(--app-danger) 14%, transparent)',
-                color: 'var(--app-danger)',
-              }}
-            >
-              Отключить
-            </button>
-          </div>
-        </>
-      ) : awaiting ? (
-        <div className="text-center">
-          <p className="text-sm font-semibold">Подключение Steam</p>
-          <p className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
-            {session?.message ?? 'Отсканируй QR-код приложением Steam'}
-          </p>
-          <img
-            src={session?.qrDataUrl ?? ''}
-            alt="QR-код Steam"
-            className="mx-auto mt-3 h-48 w-48 rounded-xl bg-white p-2"
+          <textarea
+            readOnly
+            value={command}
+            className="mt-3 min-h-20 w-full resize-none rounded-xl border-0 px-3 py-2 text-xs outline-none"
+            style={{ background: 'var(--app-surface)', color: 'var(--tg-text)' }}
           />
           <button
             type="button"
             disabled={pending}
-            onClick={() => void disconnect()}
-            className="mt-3 rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
-            style={{
-              background: 'color-mix(in srgb, var(--app-danger) 14%, transparent)',
-              color: 'var(--app-danger)',
-            }}
+            onClick={() => void copyCommand()}
+            className="mt-2 w-full rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
+            style={{ background: '#2a475e', color: '#c7d5e0' }}
           >
-            Отмена
+            {copied ? 'Команда скопирована' : 'Скопировать команду'}
           </button>
-        </div>
+          <p className="mt-2 text-xs" style={{ color: 'var(--tg-hint)' }}>
+            Код действует до {formatSync(update.expiresAt)}
+          </p>
+        </>
+      ) : status === 'completed' ? (
+        <>
+          <p className="text-sm font-semibold">Данные CS2 обновлены</p>
+          <p className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
+            Уровень, XP и Premier получены с твоего ПК
+          </p>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => void start()}
+            className="mt-3 w-full rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
+            style={{ background: '#2a475e', color: '#c7d5e0' }}
+          >
+            Обновить ещё раз
+          </button>
+        </>
       ) : (
         <>
           <p className="text-sm font-semibold">Точный опыт и Premier CS2</p>
           <p className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
-            Подключи аккаунт через Steam Guard без ввода пароля
+            Получим данные с домашнего ПК через Steam Guard без передачи пароля
           </p>
-          {canRetry && session?.message ? (
+          {status === 'expired' ? (
             <p className="mt-2 text-xs" style={{ color: 'var(--app-danger)' }}>
-              {session.message}
+              Время команды истекло
+            </p>
+          ) : null}
+          {error ? (
+            <p className="mt-2 text-xs" style={{ color: 'var(--app-danger)' }}>
+              {error}
             </p>
           ) : null}
           <button
@@ -389,10 +366,15 @@ function Cs2AuthPanel({
             className="mt-3 w-full rounded-xl px-3 py-2 text-sm font-semibold disabled:opacity-50"
             style={{ background: '#2a475e', color: '#c7d5e0' }}
           >
-            {canRetry ? 'Создать новый QR-код' : 'Подключить Steam'}
+            Получить команду для ПК
           </button>
         </>
       )}
+      {profile.cs2ExactSyncedAt ? (
+        <p className="mt-2 text-xs" style={{ color: 'var(--tg-hint)' }}>
+          Точные данные: {formatSync(profile.cs2ExactSyncedAt)}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -1227,7 +1209,7 @@ function AccountCard({
       </div>
 
       <Cs2StatsRow profile={profile} />
-      <Cs2AuthPanel
+      <Cs2LocalConnectorPanel
         profile={profile}
         initData={initData}
         onChanged={onCs2Changed}

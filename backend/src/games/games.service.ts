@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
+import { createHash, randomBytes } from 'crypto';
 import { Markup } from 'telegraf';
 import { AppsService } from '../apps/apps.service';
 import { BotService } from '../bot/bot.service';
@@ -23,7 +24,6 @@ import {
   sleep,
 } from './games.steam';
 import { fetchCs2AccountStats } from './games.cs2stats';
-import { SteamGcService } from './steam-gc.service';
 
 function nextWednesdayLabel(now = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -76,8 +76,7 @@ function serializeProfile(
     cs2ProfileXp?: number | null;
     cs2WingmanRank?: number | null;
     cs2StatsSyncedAt?: Date | null;
-    cs2AuthToken?: string | null;
-    cs2AuthConnectedAt?: Date | null;
+    cs2ExactSyncedAt?: Date | null;
     active: boolean;
     lastSyncAt: Date | null;
     lastInventorySyncAt?: Date | null;
@@ -107,8 +106,7 @@ function serializeProfile(
     cs2ProfileXp: profile.cs2ProfileXp ?? null,
     cs2WingmanRank: profile.cs2WingmanRank ?? null,
     cs2StatsSyncedAt: profile.cs2StatsSyncedAt?.toISOString() ?? null,
-    cs2AuthConnected: Boolean(profile.cs2AuthToken),
-    cs2AuthConnectedAt: profile.cs2AuthConnectedAt?.toISOString() ?? null,
+    cs2ExactSyncedAt: profile.cs2ExactSyncedAt?.toISOString() ?? null,
     active: profile.active,
     profileUrl: profile.vanityUrl
       ? `https://steamcommunity.com/id/${profile.vanityUrl}`
@@ -158,7 +156,6 @@ export class GamesService {
     private readonly configService: ConfigService,
     private readonly botService: BotService,
     private readonly appsService: AppsService,
-    private readonly steamGcService: SteamGcService,
   ) {}
 
   private steamApiKey() {
@@ -167,6 +164,26 @@ export class GamesService {
 
   private cs2SpaceApiKey() {
     return this.configService.get<string>('CS2_SPACE_API_KEY')?.trim() ?? '';
+  }
+
+  private cs2Number(
+    value: number | undefined,
+    min: number,
+    max: number,
+    nullable = false,
+  ) {
+    if (value == null && nullable) {
+      return null;
+    }
+    if (
+      value == null ||
+      !Number.isInteger(value) ||
+      value < min ||
+      value > max
+    ) {
+      return null;
+    }
+    return value;
   }
 
   private normalizeAccountFields(data?: {
@@ -402,19 +419,7 @@ export class GamesService {
     }
   }
 
-  async startCs2Auth(userId: number, profileId: string) {
-    return this.steamGcService.startQrLogin(userId, profileId);
-  }
-
-  async cs2AuthStatus(userId: number, profileId: string) {
-    return this.steamGcService.getQrLoginStatus(userId, profileId);
-  }
-
-  async disconnectCs2Auth(userId: number, profileId: string) {
-    return this.steamGcService.disconnect(userId, profileId);
-  }
-
-  async syncCs2Auth(userId: number, profileId: string) {
+  async startCs2LocalUpdate(userId: number, profileId: string) {
     const profile = await this.prisma.steamProfile.findFirst({
       where: { id: profileId, userId: BigInt(userId) },
       select: { id: true },
@@ -422,8 +427,134 @@ export class GamesService {
     if (!profile) {
       throw new NotFoundException('Аккаунт не найден');
     }
-    await this.steamGcService.syncProfile(profile.id);
-    return this.overview(userId);
+
+    const now = new Date();
+    const code = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
+    const secretHash = createHash('sha256').update(code).digest('hex');
+
+    await this.prisma.$transaction([
+      this.prisma.cs2ConnectorChallenge.deleteMany({
+        where: {
+          OR: [
+            { expiresAt: { lte: now } },
+            { userId: BigInt(userId), steamProfileId: profile.id },
+          ],
+        },
+      }),
+      this.prisma.cs2ConnectorChallenge.create({
+        data: {
+          secretHash,
+          userId: BigInt(userId),
+          steamProfileId: profile.id,
+          expiresAt,
+        },
+      }),
+    ]);
+
+    return { code, expiresAt: expiresAt.toISOString() };
+  }
+
+  async cs2LocalUpdateStatus(userId: number, profileId: string) {
+    const profile = await this.prisma.steamProfile.findFirst({
+      where: { id: profileId, userId: BigInt(userId) },
+      select: { id: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Аккаунт не найден');
+    }
+
+    const challenge = await this.prisma.cs2ConnectorChallenge.findFirst({
+      where: { userId: BigInt(userId), steamProfileId: profile.id },
+      orderBy: { createdAt: 'desc' },
+      select: { expiresAt: true, usedAt: true },
+    });
+    if (!challenge) {
+      return { state: 'idle' as const, expiresAt: null };
+    }
+    if (challenge.usedAt) {
+      return {
+        state: 'completed' as const,
+        expiresAt: challenge.expiresAt.toISOString(),
+      };
+    }
+    if (challenge.expiresAt.getTime() <= Date.now()) {
+      return {
+        state: 'expired' as const,
+        expiresAt: challenge.expiresAt.toISOString(),
+      };
+    }
+    return {
+      state: 'waiting' as const,
+      expiresAt: challenge.expiresAt.toISOString(),
+    };
+  }
+
+  async submitCs2LocalUpdate(data: {
+    code: string;
+    steamId: string;
+    cs2ProfileRank: number;
+    cs2ProfileXp: number;
+    cs2PremierRating?: number;
+    cs2WingmanRank?: number;
+  }) {
+    const now = new Date();
+    const secretHash = createHash('sha256')
+      .update(data.code)
+      .digest('hex');
+    const cs2ProfileRank = this.cs2Number(data.cs2ProfileRank, 1, 40);
+    const cs2ProfileXp = this.cs2Number(data.cs2ProfileXp, 0, 4999);
+    const cs2PremierRating = this.cs2Number(
+      data.cs2PremierRating,
+      1000,
+      100000,
+      true,
+    );
+    const cs2WingmanRank = this.cs2Number(data.cs2WingmanRank, 1, 18, true);
+
+    if (cs2ProfileRank == null || cs2ProfileXp == null) {
+      throw new BadRequestException('Некорректные данные CS2');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const challenge = await tx.cs2ConnectorChallenge.findFirst({
+        where: {
+          secretHash,
+          usedAt: null,
+          expiresAt: { gt: now },
+        },
+        select: {
+          id: true,
+          steamProfileId: true,
+          steamProfile: { select: { steamId: true } },
+        },
+      });
+      if (!challenge || challenge.steamProfile.steamId !== data.steamId) {
+        throw new BadRequestException('Код подключения недействителен');
+      }
+
+      const used = await tx.cs2ConnectorChallenge.updateMany({
+        where: { id: challenge.id, usedAt: null, expiresAt: { gt: now } },
+        data: { usedAt: now },
+      });
+      if (used.count !== 1) {
+        throw new BadRequestException('Код подключения уже использован');
+      }
+
+      await tx.steamProfile.update({
+        where: { id: challenge.steamProfileId },
+        data: {
+          cs2ProfileRank,
+          cs2ProfileXp,
+          cs2PremierRating,
+          cs2WingmanRank,
+          cs2StatsSyncedAt: now,
+          cs2ExactSyncedAt: now,
+        },
+      });
+    });
+
+    return { ok: true };
   }
 
   async setWeeklyDrop(userId: number, profileId: string, done: boolean) {
@@ -661,29 +792,34 @@ export class GamesService {
     profileId: string,
     steamId: string,
   ) {
-    let gcStats = null;
-    try {
-      gcStats = await this.steamGcService.syncProfile(profileId);
-    } catch {
-      gcStats = null;
-    }
     const stats = await fetchCs2AccountStats(steamId, this.steamApiKey(), {
       cs2SpaceApiKey: this.cs2SpaceApiKey(),
     });
+    const current = await this.prisma.steamProfile.findUnique({
+      where: { id: profileId },
+      select: { cs2ExactSyncedAt: true },
+    });
+
+    if (current?.cs2ExactSyncedAt) {
+      if (stats.cs2Hours != null) {
+        await this.prisma.steamProfile.update({
+          where: { id: profileId },
+          data: { cs2Hours: stats.cs2Hours },
+        });
+      }
+      return;
+    }
+
     await this.prisma.steamProfile.update({
       where: { id: profileId },
-      data: gcStats
-        ? {
-            ...(stats.cs2Hours != null ? { cs2Hours: stats.cs2Hours } : {}),
-          }
-        : {
-            cs2Hours: stats.cs2Hours,
-            cs2PremierRating: stats.cs2PremierRating,
-            cs2ProfileRank: stats.cs2ProfileRank,
-            cs2ProfileXp: stats.cs2ProfileXp,
-            cs2WingmanRank: stats.cs2WingmanRank,
-            cs2StatsSyncedAt: new Date(),
-          },
+      data: {
+        cs2Hours: stats.cs2Hours,
+        cs2PremierRating: stats.cs2PremierRating,
+        cs2ProfileRank: null,
+        cs2ProfileXp: null,
+        cs2WingmanRank: stats.cs2WingmanRank,
+        cs2StatsSyncedAt: new Date(),
+      },
     });
   }
 

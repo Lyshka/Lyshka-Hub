@@ -1,4 +1,14 @@
-import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class GamesInitDto {
   @IsOptional()
@@ -51,4 +61,37 @@ export class GamesUpdateProfileDto extends GamesProfileDto {
 export class GamesWeeklyDropDto extends GamesProfileDto {
   @IsBoolean()
   done!: boolean;
+}
+
+export class Cs2ConnectorSubmitDto {
+  @IsString()
+  @MinLength(40)
+  @MaxLength(100)
+  code!: string;
+
+  @IsString()
+  @Matches(/^\d{17}$/)
+  steamId!: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(40)
+  cs2ProfileRank!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(4999)
+  cs2ProfileXp!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1000)
+  @Max(100000)
+  cs2PremierRating?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(18)
+  cs2WingmanRank?: number;
 }

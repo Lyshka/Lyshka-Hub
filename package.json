@@ -9,6 +9,7 @@
     "dev": "concurrently -n api,web -c teal,cyan \"npm --prefix backend run start:dev\" \"npm --prefix frontend run dev\"",
     "dev:backend": "npm --prefix backend run start:dev",
     "dev:frontend": "npm --prefix frontend run dev",
+    "cs2:connector": "npm --prefix connector run start --",
     "tunnel": "npx --yes cloudflared tunnel --url http://localhost:5173",
     "build": "npm --prefix backend run build && npm --prefix frontend run build"
   },

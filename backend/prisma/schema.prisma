@@ -23,6 +23,7 @@ model User {
   catPosts     CatPost[]
   steamProfiles SteamProfile[]
   steamGames   SteamWishlistGame[]
+  cs2ConnectorChallenges Cs2ConnectorChallenge[]
   studySections StudySection[]
   studyItems    StudyItem[]
   buyListsOwned BuyList[]       @relation("BuyListOwner")
@@ -148,9 +149,7 @@ model SteamProfile {
   cs2ProfileXp         Int?
   cs2WingmanRank       Int?
   cs2StatsSyncedAt     DateTime?
-  cs2AuthToken         String?
-  cs2AuthConnectedAt   DateTime?
-  cs2AuthAccountName   String?
+  cs2ExactSyncedAt     DateTime?
   active               Boolean              @default(false)
   lastSyncAt           DateTime?
   lastInventorySyncAt  DateTime?
@@ -160,12 +159,29 @@ model SteamProfile {
   user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   games                SteamWishlistGame[]
   inventory            SteamInventoryItem[]
+  connectorChallenges  Cs2ConnectorChallenge[]
 
   @@unique([userId, steamId])
   @@index([userId])
   @@index([steamId])
   @@index([userId, active])
   @@index([weeklyDropDone])
+}
+
+model Cs2ConnectorChallenge {
+  id             String       @id @default(cuid())
+  secretHash     String       @unique
+  userId         BigInt
+  steamProfileId String
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steamProfile   SteamProfile @relation(fields: [steamProfileId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([steamProfileId, expiresAt])
+  @@index([expiresAt])
 }
 
 model SteamWishlistGame {
