@@ -7,12 +7,12 @@ import { formatYmd } from '../common/calendar';
 const PRIORBANK_RATES_URL =
   'https://www.priorbank.by/offers/services/currency-branch?p_p_id=ExchangeRates_INSTANCE_Cz33CKs1AIC4&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view&p_p_resource_id=ajaxMainPageRatesConverterGetRates&p_p_cacheability=cacheLevelPage';
 
-const USD = 840;
+const EUR = 978;
 const BYN = 933;
-const SELL_ALERT_THRESHOLD = 3.1;
+const BUY_ALERT_THRESHOLD = 3.4;
 const TIME_ZONE = 'Europe/Minsk';
 
-export const RATES_USD_SEEN_CALLBACK = 'rates:usd:seen';
+export const RATES_EUR_SEEN_CALLBACK = 'rates:eur:seen';
 
 type PriorRate = {
   channelName?: string;
@@ -29,7 +29,7 @@ type PriorBundle = {
   simpleCurrencyList?: PriorRate[];
 };
 
-type UsdQuote = {
+type EurQuote = {
   buy: number;
   sell: number;
   date?: string;
@@ -38,15 +38,15 @@ type UsdQuote = {
 
 @Injectable()
 export class RatesService {
-  private highSellActive = false;
+  private highBuyActive = false;
   private lastAlertSentAt = 0;
   private readonly mutedUntilDay = new Map<number, string>();
 
   constructor(private readonly botService: BotService) {}
 
   @Cron('0 * * * *', { timeZone: TIME_ZONE })
-  async sendHourlyUsdRate() {
-    const quote = await this.fetchCardUsd();
+  async sendHourlyEurRate() {
+    const quote = await this.fetchCardEur();
     if (!quote) {
       return;
     }
@@ -56,40 +56,40 @@ export class RatesService {
   }
 
   @Cron('*/5 * * * *', { timeZone: TIME_ZONE })
-  async checkSellThreshold() {
-    const quote = await this.fetchCardUsd();
+  async checkBuyThreshold() {
+    const quote = await this.fetchCardEur();
     if (!quote) {
       return;
     }
 
-    const wasActive = this.highSellActive;
-    this.highSellActive = quote.sell >= SELL_ALERT_THRESHOLD;
-    if (!this.highSellActive) {
+    const wasActive = this.highBuyActive;
+    this.highBuyActive = quote.buy >= BUY_ALERT_THRESHOLD;
+    if (!this.highBuyActive) {
       return;
     }
 
     if (!wasActive) {
-      await this.sendHighSellAlerts(quote);
+      await this.sendHighBuyAlerts(quote);
     }
   }
 
   @Cron('* * * * *', { timeZone: TIME_ZONE })
-  async sendMinuteHighSellAlerts() {
-    if (!this.highSellActive) {
+  async sendMinuteHighBuyAlerts() {
+    if (!this.highBuyActive) {
       return;
     }
 
-    const quote = await this.fetchCardUsd();
+    const quote = await this.fetchCardEur();
     if (!quote) {
       return;
     }
 
-    if (quote.sell < SELL_ALERT_THRESHOLD) {
-      this.highSellActive = false;
+    if (quote.buy < BUY_ALERT_THRESHOLD) {
+      this.highBuyActive = false;
       return;
     }
 
-    await this.sendHighSellAlerts(quote);
+    await this.sendHighBuyAlerts(quote);
   }
 
   muteAlertsForToday(userId: number) {
@@ -100,7 +100,7 @@ export class RatesService {
     return this.mutedUntilDay.get(userId) === formatYmd(new Date(), TIME_ZONE);
   }
 
-  private async sendHighSellAlerts(quote: UsdQuote) {
+  private async sendHighBuyAlerts(quote: EurQuote) {
     const now = Date.now();
     if (now - this.lastAlertSentAt < 50_000) {
       return;
@@ -114,11 +114,11 @@ export class RatesService {
     }
 
     const text = [
-      'Приорбанк — USD по карте выше порога',
+      'Приорбанк — EUR по карте: покупка выше порога',
       '',
       this.formatQuote(quote),
       '',
-      `Порог: ${SELL_ALERT_THRESHOLD}`,
+      `Порог покупки: ${BUY_ALERT_THRESHOLD}`,
       quote.date
         ? `Обновлено: ${quote.date}${quote.time ? ` ${quote.time}` : ''}`
         : null,
@@ -127,7 +127,7 @@ export class RatesService {
       .join('\n');
 
     const extra = Markup.inlineKeyboard([
-      Markup.button.callback('Увидел, хватит на сегодня', RATES_USD_SEEN_CALLBACK),
+      Markup.button.callback('Увидел, хватит на сегодня', RATES_EUR_SEEN_CALLBACK),
     ]);
 
     this.lastAlertSentAt = now;
@@ -151,9 +151,9 @@ export class RatesService {
     }
   }
 
-  private buildCardMessage(quote: UsdQuote): string {
+  private buildCardMessage(quote: EurQuote): string {
     const lines = [
-      'Приорбанк — курс USD по карте',
+      'Приорбанк — курс EUR по карте',
       '',
       this.formatQuote(quote),
     ];
@@ -168,7 +168,7 @@ export class RatesService {
     return lines.join('\n');
   }
 
-  private formatQuote(quote: UsdQuote): string {
+  private formatQuote(quote: EurQuote): string {
     return `Покупка: ${this.formatRate(quote.buy)} BYN\nПродажа: ${this.formatRate(quote.sell)} BYN`;
   }
 
@@ -176,15 +176,15 @@ export class RatesService {
     return value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
   }
 
-  private async fetchCardUsd(): Promise<UsdQuote | null> {
+  private async fetchCardEur(): Promise<EurQuote | null> {
     const rates = await this.fetchPriorbankRates();
     if (!rates) {
       return null;
     }
-    return this.pickUsd(rates.resultCard);
+    return this.pickEur(rates.resultCard);
   }
 
-  private pickUsd(raw: string | undefined): UsdQuote | null {
+  private pickEur(raw: string | undefined): EurQuote | null {
     if (!raw) {
       return null;
     }
@@ -197,7 +197,7 @@ export class RatesService {
     }
 
     const matches = (bundle.simpleCurrencyList ?? []).filter(
-      (item) => item.baseCurrency === USD && item.ratedCurrency === BYN,
+      (item) => item.baseCurrency === EUR && item.ratedCurrency === BYN,
     );
     if (matches.length === 0) {
       return null;
