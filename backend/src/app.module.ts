@@ -10,6 +10,7 @@ import { CatsModule } from './cats/cats.module';
 import { GamesModule } from './games/games.module';
 import { MedsModule } from './meds/meds.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RatesModule } from './rates/rates.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { StatsModule } from './stats/stats.module';
 import { StudyModule } from './study/study.module';
@@ -35,6 +36,7 @@ import { UsersModule } from './users/users.module';
     AdminModule,
     BotModule,
     RemindersModule,
+    RatesModule,
   ],
 })
 export class AppModule {}
