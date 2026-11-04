@@ -63,6 +63,15 @@ const CATALOG = [
     isSystem: false,
   },
   {
+    slug: 'rates',
+    name: 'Курсы',
+    description: 'Приорбанк по карте, планки и калькулятор вывода',
+    icon: 'rates',
+    color: '#0369a1',
+    sortOrder: 70,
+    isSystem: false,
+  },
+  {
     slug: 'admin',
     name: 'Админка',
     description: 'Пользователи и доступы',

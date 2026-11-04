@@ -161,6 +161,26 @@ export function AppIcon({ slug, className = 'h-9 w-9' }: AppIconProps) {
     );
   }
 
+  if (slug === 'rates') {
+    return (
+      <svg viewBox="0 0 48 48" fill="none" className={className} aria-hidden>
+        <circle cx="24" cy="24" r="14" fill="currentColor" />
+        <path
+          d="M18 28.5c2.2 2 4.2 3 6 3s3.8-1 6-3"
+          stroke="#fff"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+        />
+        <path
+          d="M20 18h8M24 15.5V30"
+          stroke="#fff"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
   return (
     <svg viewBox="0 0 48 48" fill="none" className={className} aria-hidden>
       <rect x="10" y="10" width="28" height="28" rx="8" fill="currentColor" />
@@ -222,6 +242,13 @@ export function appAccent(slug: string, fallback: string) {
       from: '#e879f9',
       to: '#a21caf',
       glow: 'rgba(162, 28, 175, 0.4)',
+    };
+  }
+  if (slug === 'rates') {
+    return {
+      from: '#38bdf8',
+      to: '#0369a1',
+      glow: 'rgba(3, 105, 161, 0.4)',
     };
   }
   return {

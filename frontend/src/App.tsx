@@ -11,6 +11,7 @@ import { GamesApp } from './screens/GamesApp';
 import { LauncherScreen } from './screens/LauncherScreen';
 import { MedsApp } from './screens/MedsApp';
 import { LinksApp } from './screens/LinksApp';
+import { RatesApp } from './screens/RatesApp';
 import { StatsApp } from './screens/StatsApp';
 import { TelegramProvider, useTelegram } from './telegram/TelegramProvider';
 
@@ -35,6 +36,9 @@ function backgroundVariant(app: PlatformApp | null): AppBackgroundVariant {
   }
   if (app.slug === 'buy') {
     return 'buy';
+  }
+  if (app.slug === 'rates') {
+    return 'rates';
   }
   if (app.slug === 'admin') {
     return 'admin';
@@ -109,6 +113,8 @@ function AppContent() {
     screen = <LinksApp onBack={() => setActiveApp(null)} />;
   } else if (activeApp?.slug === 'buy') {
     screen = <BuyApp onBack={() => setActiveApp(null)} />;
+  } else if (activeApp?.slug === 'rates') {
+    screen = <RatesApp onBack={() => setActiveApp(null)} />;
   }
 
   return (

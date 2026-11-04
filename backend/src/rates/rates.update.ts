@@ -1,19 +1,22 @@
 import { Action, Ctx, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
-import { RatesService, RATES_EUR_SEEN_CALLBACK } from './rates.service';
+import { RATE_WATCH_KEYS, type RateWatchKey } from './rates.dto';
+import { RatesService } from './rates.service';
 
 @Update()
 export class RatesUpdate {
   constructor(private readonly ratesService: RatesService) {}
 
-  @Action(RATES_EUR_SEEN_CALLBACK)
-  async onEurSeen(@Ctx() ctx: Context) {
+  @Action(/^rates:seen:(.+)$/)
+  async onSeen(@Ctx() ctx: Context & { match?: RegExpExecArray }) {
     const userId = ctx.from?.id;
-    if (!userId) {
+    const key = ctx.match?.[1] ?? '';
+
+    if (!userId || !this.isWatchKey(key)) {
       return;
     }
 
-    this.ratesService.muteAlertsForToday(userId);
+    await this.ratesService.muteWatchForToday(userId, key);
 
     try {
       await ctx.answerCbQuery('Ок, сегодня больше не напомню');
@@ -26,5 +29,9 @@ export class RatesUpdate {
     } catch {
       //
     }
+  }
+
+  private isWatchKey(value: string): value is RateWatchKey {
+    return (RATE_WATCH_KEYS as readonly string[]).includes(value);
   }
 }

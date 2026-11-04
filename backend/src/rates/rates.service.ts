@@ -1,148 +1,150 @@
 import { Injectable } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { Markup } from 'telegraf';
+import { AppsService } from '../apps/apps.service';
 import { BotService } from '../bot/bot.service';
 import { formatYmd } from '../common/calendar';
+import { PrismaService } from '../prisma/prisma.service';
+import {
+  fetchPriorbankCardRates,
+  type CardQuote,
+  type CardRates,
+} from './rates.priorbank';
+import { RATE_WATCH_KEYS, type RateWatchKey } from './rates.dto';
+import { fetchVisaUsdToEur } from './rates.visa';
 
-const PRIORBANK_RATES_URL =
-  'https://www.priorbank.by/offers/services/currency-branch?p_p_id=ExchangeRates_INSTANCE_Cz33CKs1AIC4&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view&p_p_resource_id=ajaxMainPageRatesConverterGetRates&p_p_cacheability=cacheLevelPage';
-
-const EUR = 978;
-const BYN = 933;
-const BUY_ALERT_THRESHOLD = 3.4;
 const TIME_ZONE = 'Europe/Minsk';
+const COMMISSION_RATE = 0.01;
 
-export const RATES_EUR_SEEN_CALLBACK = 'rates:eur:seen';
+export const RATES_SEEN_PREFIX = 'rates:seen:';
 
-type PriorRate = {
-  channelName?: string;
-  validFromDate?: string;
-  validFromTime?: string;
-  baseCurrency: number;
-  ratedCurrency: number;
-  quantityFrom?: number;
-  sellRate: number;
-  buyRate: number;
-};
-
-type PriorBundle = {
-  simpleCurrencyList?: PriorRate[];
-};
-
-type EurQuote = {
-  buy: number;
-  sell: number;
-  date?: string;
-  time?: string;
+const WATCH_META: Record<
+  RateWatchKey,
+  { currency: 'USD' | 'EUR'; side: 'buy' | 'sell'; title: string }
+> = {
+  usd_buy: { currency: 'USD', side: 'buy', title: 'USD покупка' },
+  usd_sell: { currency: 'USD', side: 'sell', title: 'USD продажа' },
+  eur_buy: { currency: 'EUR', side: 'buy', title: 'EUR покупка' },
+  eur_sell: { currency: 'EUR', side: 'sell', title: 'EUR продажа' },
 };
 
 @Injectable()
 export class RatesService {
-  private highBuyActive = false;
-  private lastAlertSentAt = 0;
-  private readonly mutedUntilDay = new Map<number, string>();
+  private cachedRates: CardRates | null = null;
+  private cachedAt = 0;
+  private readonly activeKeys = new Set<RateWatchKey>();
+  private readonly lastAlertSentAt = new Map<string, number>();
 
-  constructor(private readonly botService: BotService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly botService: BotService,
+    private readonly appsService: AppsService,
+  ) {}
 
-  @Cron('0 * * * *', { timeZone: TIME_ZONE })
-  async sendHourlyEurRate() {
-    const quote = await this.fetchCardEur();
-    if (!quote) {
-      return;
-    }
-
-    const text = this.buildCardMessage(quote);
-    await this.broadcast(text);
-  }
-
-  @Cron('*/5 * * * *', { timeZone: TIME_ZONE })
-  async checkBuyThreshold() {
-    const quote = await this.fetchCardEur();
-    if (!quote) {
-      return;
-    }
-
-    const wasActive = this.highBuyActive;
-    this.highBuyActive = quote.buy >= BUY_ALERT_THRESHOLD;
-    if (!this.highBuyActive) {
-      return;
-    }
-
-    if (!wasActive) {
-      await this.sendHighBuyAlerts(quote);
-    }
-  }
-
-  @Cron('* * * * *', { timeZone: TIME_ZONE })
-  async sendMinuteHighBuyAlerts() {
-    if (!this.highBuyActive) {
-      return;
-    }
-
-    const quote = await this.fetchCardEur();
-    if (!quote) {
-      return;
-    }
-
-    if (quote.buy < BUY_ALERT_THRESHOLD) {
-      this.highBuyActive = false;
-      return;
-    }
-
-    await this.sendHighBuyAlerts(quote);
-  }
-
-  muteAlertsForToday(userId: number) {
-    this.mutedUntilDay.set(userId, formatYmd(new Date(), TIME_ZONE));
-  }
-
-  private isMutedToday(userId: number): boolean {
-    return this.mutedUntilDay.get(userId) === formatYmd(new Date(), TIME_ZONE);
-  }
-
-  private async sendHighBuyAlerts(quote: EurQuote) {
-    const now = Date.now();
-    if (now - this.lastAlertSentAt < 50_000) {
-      return;
-    }
-
-    const recipients = this.botService
-      .getAdminIds()
-      .filter((chatId) => !this.isMutedToday(chatId));
-    if (recipients.length === 0) {
-      return;
-    }
-
-    const text = [
-      'Приорбанк — EUR по карте: покупка выше порога',
-      '',
-      this.formatQuote(quote),
-      '',
-      `Порог покупки: ${BUY_ALERT_THRESHOLD}`,
-      quote.date
-        ? `Обновлено: ${quote.date}${quote.time ? ` ${quote.time}` : ''}`
-        : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const extra = Markup.inlineKeyboard([
-      Markup.button.callback('Увидел, хватит на сегодня', RATES_EUR_SEEN_CALLBACK),
+  async overview(userId: number) {
+    const [rates, watches] = await Promise.all([
+      this.getCardRates(),
+      this.ensureWatches(userId),
     ]);
 
-    this.lastAlertSentAt = now;
-
-    for (const chatId of recipients) {
-      try {
-        await this.botService.sendMessage(chatId, text, extra);
-      } catch {
-        //
-      }
-    }
+    return {
+      rates: this.serializeRates(rates),
+      watches: watches.map((watch) => this.serializeWatch(watch, rates)),
+      commissionRate: COMMISSION_RATE,
+    };
   }
 
-  private async broadcast(text: string) {
-    for (const chatId of this.botService.getAdminIds()) {
+  async updateWatch(
+    userId: number,
+    key: RateWatchKey,
+    data: { enabled?: boolean; threshold?: number | null },
+  ) {
+    await this.ensureWatches(userId);
+
+    const updated = await this.prisma.rateWatch.update({
+      where: {
+        userId_key: {
+          userId: BigInt(userId),
+          key,
+        },
+      },
+      data: {
+        ...(typeof data.enabled === 'boolean' ? { enabled: data.enabled } : {}),
+        ...(data.threshold !== undefined
+          ? { threshold: data.threshold }
+          : {}),
+      },
+    });
+
+    const rates = await this.getCardRates();
+    return {
+      rates: this.serializeRates(rates),
+      watch: this.serializeWatch(updated, rates),
+    };
+  }
+
+  async calculate(_userId: number, amountUsd: number) {
+    const [visa, cardRates] = await Promise.all([
+      fetchVisaUsdToEur(amountUsd),
+      this.getCardRates(true),
+    ]);
+
+    if (!visa || !cardRates?.eur) {
+      return {
+        ok: false as const,
+        error: 'Не удалось получить курсы для расчёта',
+      };
+    }
+
+    const eurAmount = amountUsd * visa.rate;
+    const eurSell = cardRates.eur.sell;
+    const bynAmount = eurAmount * eurSell;
+    const commission = bynAmount * COMMISSION_RATE;
+    const total = bynAmount + commission;
+
+    return {
+      ok: true as const,
+      amountUsd,
+      visa: {
+        rate: visa.rate,
+        source: visa.source,
+        asOf: visa.asOf ?? null,
+      },
+      eurAmount,
+      priorbank: {
+        eurSell,
+        date: cardRates.eur.date ?? null,
+        time: cardRates.eur.time ?? null,
+      },
+      bynAmount,
+      commissionRate: COMMISSION_RATE,
+      commission,
+      total,
+    };
+  }
+
+  muteWatchForToday(userId: number, key: RateWatchKey) {
+    const today = formatYmd(new Date(), TIME_ZONE);
+    return this.prisma.rateWatch.updateMany({
+      where: {
+        userId: BigInt(userId),
+        key,
+      },
+      data: { mutedOn: today },
+    });
+  }
+
+  @Cron('0 * * * *', { timeZone: TIME_ZONE })
+  async sendHourlyDigest() {
+    const rates = await this.getCardRates(true);
+    if (!rates?.usd && !rates?.eur) {
+      return;
+    }
+
+    const text = this.buildDigestMessage(rates);
+    const subscribers = await this.appsService.listSubscriberIds('rates');
+
+    for (const chatId of subscribers) {
       try {
         await this.botService.sendMessage(chatId, text);
       } catch {
@@ -151,89 +153,287 @@ export class RatesService {
     }
   }
 
-  private buildCardMessage(quote: EurQuote): string {
-    const lines = [
-      'Приорбанк — курс EUR по карте',
-      '',
-      this.formatQuote(quote),
-    ];
+  @Cron('*/5 * * * *', { timeZone: TIME_ZONE })
+  async checkThresholds() {
+    const rates = await this.getCardRates(true);
+    if (!rates) {
+      return;
+    }
 
-    if (quote.date) {
+    const watches = await this.prisma.rateWatch.findMany({
+      where: {
+        enabled: true,
+        threshold: { not: null },
+      },
+    });
+
+    const newlyTriggered: Array<{
+      userId: number;
+      key: RateWatchKey;
+      threshold: number;
+      value: number;
+    }> = [];
+
+    this.activeKeys.clear();
+
+    for (const watch of watches) {
+      if (!this.isWatchKey(watch.key) || watch.threshold == null) {
+        continue;
+      }
+      const value = this.readWatchValue(watch.key, rates);
+      if (value == null || value < watch.threshold) {
+        continue;
+      }
+
+      this.activeKeys.add(watch.key);
+      newlyTriggered.push({
+        userId: Number(watch.userId),
+        key: watch.key,
+        threshold: watch.threshold,
+        value,
+      });
+    }
+
+    for (const item of newlyTriggered) {
+      await this.sendWatchAlert(item, rates);
+    }
+  }
+
+  @Cron('* * * * *', { timeZone: TIME_ZONE })
+  async sendMinuteAlerts() {
+    if (this.activeKeys.size === 0) {
+      return;
+    }
+
+    const rates = await this.getCardRates(true);
+    if (!rates) {
+      return;
+    }
+
+    const keys = [...this.activeKeys];
+    const watches = await this.prisma.rateWatch.findMany({
+      where: {
+        enabled: true,
+        key: { in: keys },
+        threshold: { not: null },
+      },
+    });
+
+    this.activeKeys.clear();
+
+    for (const watch of watches) {
+      if (!this.isWatchKey(watch.key) || watch.threshold == null) {
+        continue;
+      }
+      const value = this.readWatchValue(watch.key, rates);
+      if (value == null || value < watch.threshold) {
+        continue;
+      }
+      this.activeKeys.add(watch.key);
+      await this.sendWatchAlert(
+        {
+          userId: Number(watch.userId),
+          key: watch.key,
+          threshold: watch.threshold,
+          value,
+        },
+        rates,
+      );
+    }
+  }
+
+  private async sendWatchAlert(
+    item: {
+      userId: number;
+      key: RateWatchKey;
+      threshold: number;
+      value: number;
+    },
+    rates: CardRates,
+  ) {
+    const today = formatYmd(new Date(), TIME_ZONE);
+    const watch = await this.prisma.rateWatch.findUnique({
+      where: {
+        userId_key: {
+          userId: BigInt(item.userId),
+          key: item.key,
+        },
+      },
+    });
+    if (!watch || !watch.enabled || watch.mutedOn === today) {
+      return;
+    }
+
+    const dedupeKey = `${item.userId}:${item.key}`;
+    const now = Date.now();
+    const last = this.lastAlertSentAt.get(dedupeKey) ?? 0;
+    if (now - last < 50_000) {
+      return;
+    }
+
+    const meta = WATCH_META[item.key];
+    const quote = meta.currency === 'USD' ? rates.usd : rates.eur;
+    const text = [
+      `Приорбанк — ${meta.title} выше планки`,
+      '',
+      `Сейчас: ${this.formatRate(item.value)} BYN`,
+      `Планка: ${this.formatRate(item.threshold)} BYN`,
+      quote
+        ? `Покупка: ${this.formatRate(quote.buy)} / Продажа: ${this.formatRate(quote.sell)}`
+        : null,
+      quote?.date
+        ? `Обновлено: ${quote.date}${quote.time ? ` ${quote.time}` : ''}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const extra = Markup.inlineKeyboard([
+      Markup.button.callback(
+        'Увидел, хватит на сегодня',
+        `${RATES_SEEN_PREFIX}${item.key}`,
+      ),
+    ]);
+
+    this.lastAlertSentAt.set(dedupeKey, now);
+
+    try {
+      await this.botService.sendMessage(item.userId, text, extra);
+    } catch {
+      //
+    }
+  }
+
+  private async ensureWatches(userId: number) {
+    const uid = BigInt(userId);
+    const existing = await this.prisma.rateWatch.findMany({
+      where: { userId: uid },
+    });
+    const have = new Set(existing.map((item) => item.key));
+
+    for (const key of RATE_WATCH_KEYS) {
+      if (have.has(key)) {
+        continue;
+      }
+      await this.prisma.rateWatch.create({
+        data: {
+          userId: uid,
+          key,
+          enabled: false,
+          threshold: null,
+        },
+      });
+    }
+
+    return this.prisma.rateWatch.findMany({
+      where: { userId: uid },
+      orderBy: { key: 'asc' },
+    });
+  }
+
+  private async getCardRates(force = false): Promise<CardRates | null> {
+    if (!force && this.cachedRates && Date.now() - this.cachedAt < 60_000) {
+      return this.cachedRates;
+    }
+
+    const rates = await fetchPriorbankCardRates();
+    if (rates) {
+      this.cachedRates = rates;
+      this.cachedAt = Date.now();
+    }
+    return rates ?? this.cachedRates;
+  }
+
+  private buildDigestMessage(rates: CardRates): string {
+    const lines = ['Приорбанк — курсы по карте'];
+
+    if (rates.usd) {
       lines.push(
         '',
-        `Обновлено: ${quote.date}${quote.time ? ` ${quote.time}` : ''}`,
+        'USD:',
+        `Покупка: ${this.formatRate(rates.usd.buy)} BYN`,
+        `Продажа: ${this.formatRate(rates.usd.sell)} BYN`,
+      );
+    }
+    if (rates.eur) {
+      lines.push(
+        '',
+        'EUR:',
+        `Покупка: ${this.formatRate(rates.eur.buy)} BYN`,
+        `Продажа: ${this.formatRate(rates.eur.sell)} BYN`,
+      );
+    }
+
+    const stamp = rates.usd ?? rates.eur;
+    if (stamp?.date) {
+      lines.push(
+        '',
+        `Обновлено: ${stamp.date}${stamp.time ? ` ${stamp.time}` : ''}`,
       );
     }
 
     return lines.join('\n');
   }
 
-  private formatQuote(quote: EurQuote): string {
-    return `Покупка: ${this.formatRate(quote.buy)} BYN\nПродажа: ${this.formatRate(quote.sell)} BYN`;
+  private serializeRates(rates: CardRates | null) {
+    return {
+      usd: rates?.usd ? this.serializeQuote(rates.usd) : null,
+      eur: rates?.eur ? this.serializeQuote(rates.eur) : null,
+    };
+  }
+
+  private serializeQuote(quote: CardQuote) {
+    return {
+      buy: quote.buy,
+      sell: quote.sell,
+      date: quote.date ?? null,
+      time: quote.time ?? null,
+    };
+  }
+
+  private serializeWatch(
+    watch: {
+      id: string;
+      key: string;
+      enabled: boolean;
+      threshold: number | null;
+      mutedOn: string | null;
+    },
+    rates: CardRates | null,
+  ) {
+    const key = this.isWatchKey(watch.key) ? watch.key : null;
+    const meta = key ? WATCH_META[key] : null;
+    const value =
+      key && rates ? this.readWatchValue(key, rates) : null;
+    const today = formatYmd(new Date(), TIME_ZONE);
+
+    return {
+      id: watch.id,
+      key: watch.key,
+      title: meta?.title ?? watch.key,
+      currency: meta?.currency ?? null,
+      side: meta?.side ?? null,
+      enabled: watch.enabled,
+      threshold: watch.threshold,
+      value,
+      mutedToday: watch.mutedOn === today,
+    };
+  }
+
+  private readWatchValue(key: RateWatchKey, rates: CardRates): number | null {
+    const meta = WATCH_META[key];
+    const quote = meta.currency === 'USD' ? rates.usd : rates.eur;
+    if (!quote) {
+      return null;
+    }
+    return meta.side === 'buy' ? quote.buy : quote.sell;
+  }
+
+  private isWatchKey(value: string): value is RateWatchKey {
+    return (RATE_WATCH_KEYS as readonly string[]).includes(value);
   }
 
   private formatRate(value: number): string {
     return value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-  }
-
-  private async fetchCardEur(): Promise<EurQuote | null> {
-    const rates = await this.fetchPriorbankRates();
-    if (!rates) {
-      return null;
-    }
-    return this.pickEur(rates.resultCard);
-  }
-
-  private pickEur(raw: string | undefined): EurQuote | null {
-    if (!raw) {
-      return null;
-    }
-
-    let bundle: PriorBundle;
-    try {
-      bundle = JSON.parse(raw) as PriorBundle;
-    } catch {
-      return null;
-    }
-
-    const matches = (bundle.simpleCurrencyList ?? []).filter(
-      (item) => item.baseCurrency === EUR && item.ratedCurrency === BYN,
-    );
-    if (matches.length === 0) {
-      return null;
-    }
-
-    const preferred =
-      matches.find((item) => (item.quantityFrom ?? 0) === 0) ?? matches[0];
-
-    return {
-      buy: preferred.buyRate,
-      sell: preferred.sellRate,
-      date: preferred.validFromDate,
-      time: preferred.validFromTime,
-    };
-  }
-
-  private async fetchPriorbankRates(): Promise<Record<string, string> | null> {
-    try {
-      const response = await fetch(PRIORBANK_RATES_URL, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json, text/javascript, */*; q=0.01',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'X-Requested-With': 'XMLHttpRequest',
-          Referer: 'https://www.priorbank.by/offers/services/currency-branch',
-        },
-      });
-
-      if (!response.ok) {
-        return null;
-      }
-
-      return (await response.json()) as Record<string, string>;
-    } catch {
-      return null;
-    }
   }
 }

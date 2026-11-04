@@ -98,6 +98,59 @@ export type AdminOverview = {
   users: AdminUser[];
 };
 
+export type RatesQuote = {
+  buy: number;
+  sell: number;
+  date: string | null;
+  time: string | null;
+};
+
+export type RatesWatch = {
+  id: string;
+  key: string;
+  title: string;
+  currency: 'USD' | 'EUR' | null;
+  side: 'buy' | 'sell' | null;
+  enabled: boolean;
+  threshold: number | null;
+  value: number | null;
+  mutedToday: boolean;
+};
+
+export type RatesOverview = {
+  rates: {
+    usd: RatesQuote | null;
+    eur: RatesQuote | null;
+  };
+  watches: RatesWatch[];
+  commissionRate: number;
+};
+
+export type RatesCalcResult =
+  | {
+      ok: true;
+      amountUsd: number;
+      visa: {
+        rate: number;
+        source: 'visa' | 'fallback';
+        asOf: string | null;
+      };
+      eurAmount: number;
+      priorbank: {
+        eurSell: number;
+        date: string | null;
+        time: string | null;
+      };
+      bynAmount: number;
+      commissionRate: number;
+      commission: number;
+      total: number;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -936,5 +989,30 @@ export const api = {
     request<Overview['settings']>('/api/meds/settings', {
       method: 'POST',
       body: JSON.stringify({ initData, ...data }),
+    }),
+  ratesOverview: (initData: string) =>
+    request<RatesOverview>('/api/rates/overview', {
+      method: 'POST',
+      body: JSON.stringify({ initData }),
+    }),
+  ratesWatch: (
+    initData: string,
+    data: {
+      key: string;
+      enabled?: boolean;
+      threshold?: number | null;
+    },
+  ) =>
+    request<{ rates: RatesOverview['rates']; watch: RatesWatch }>(
+      '/api/rates/watch',
+      {
+        method: 'POST',
+        body: JSON.stringify({ initData, ...data }),
+      },
+    ),
+  ratesCalc: (initData: string, amountUsd: number) =>
+    request<RatesCalcResult>('/api/rates/calc', {
+      method: 'POST',
+      body: JSON.stringify({ initData, amountUsd }),
     }),
 };
