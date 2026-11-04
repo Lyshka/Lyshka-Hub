@@ -1,28 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { Markup } from 'telegraf';
 import { BotService } from '../bot/bot.service';
+import { formatYmd } from '../common/calendar';
 
 const PRIORBANK_RATES_URL =
   'https://www.priorbank.by/offers/services/currency-branch?p_p_id=ExchangeRates_INSTANCE_Cz33CKs1AIC4&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view&p_p_resource_id=ajaxMainPageRatesConverterGetRates&p_p_cacheability=cacheLevelPage';
 
 const USD = 840;
 const BYN = 933;
+const SELL_ALERT_THRESHOLD = 3.1;
+const TIME_ZONE = 'Europe/Minsk';
+
+export const RATES_USD_SEEN_CALLBACK = 'rates:usd:seen';
 
 type PriorRate = {
   channelName?: string;
   validFromDate?: string;
   validFromTime?: string;
   baseCurrency: number;
-  baseCurrencyNominal?: number;
   ratedCurrency: number;
   quantityFrom?: number;
-  quantityTo?: number;
   sellRate: number;
   buyRate: number;
 };
 
 type PriorBundle = {
-  code?: number;
   simpleCurrencyList?: PriorRate[];
 };
 
@@ -35,15 +38,110 @@ type UsdQuote = {
 
 @Injectable()
 export class RatesService {
+  private highSellActive = false;
+  private lastAlertSentAt = 0;
+  private readonly mutedUntilDay = new Map<number, string>();
+
   constructor(private readonly botService: BotService) {}
 
-  @Cron('0 * * * *', { timeZone: 'Europe/Minsk' })
+  @Cron('0 * * * *', { timeZone: TIME_ZONE })
   async sendHourlyUsdRate() {
-    const text = await this.buildUsdMessage();
-    if (!text) {
+    const quote = await this.fetchCardUsd();
+    if (!quote) {
       return;
     }
 
+    const text = this.buildCardMessage(quote);
+    await this.broadcast(text);
+  }
+
+  @Cron('*/5 * * * *', { timeZone: TIME_ZONE })
+  async checkSellThreshold() {
+    const quote = await this.fetchCardUsd();
+    if (!quote) {
+      return;
+    }
+
+    const wasActive = this.highSellActive;
+    this.highSellActive = quote.sell >= SELL_ALERT_THRESHOLD;
+    if (!this.highSellActive) {
+      return;
+    }
+
+    if (!wasActive) {
+      await this.sendHighSellAlerts(quote);
+    }
+  }
+
+  @Cron('* * * * *', { timeZone: TIME_ZONE })
+  async sendMinuteHighSellAlerts() {
+    if (!this.highSellActive) {
+      return;
+    }
+
+    const quote = await this.fetchCardUsd();
+    if (!quote) {
+      return;
+    }
+
+    if (quote.sell < SELL_ALERT_THRESHOLD) {
+      this.highSellActive = false;
+      return;
+    }
+
+    await this.sendHighSellAlerts(quote);
+  }
+
+  muteAlertsForToday(userId: number) {
+    this.mutedUntilDay.set(userId, formatYmd(new Date(), TIME_ZONE));
+  }
+
+  private isMutedToday(userId: number): boolean {
+    return this.mutedUntilDay.get(userId) === formatYmd(new Date(), TIME_ZONE);
+  }
+
+  private async sendHighSellAlerts(quote: UsdQuote) {
+    const now = Date.now();
+    if (now - this.lastAlertSentAt < 50_000) {
+      return;
+    }
+
+    const recipients = this.botService
+      .getAdminIds()
+      .filter((chatId) => !this.isMutedToday(chatId));
+    if (recipients.length === 0) {
+      return;
+    }
+
+    const text = [
+      'Приорбанк — USD по карте выше порога',
+      '',
+      this.formatQuote(quote),
+      '',
+      `Порог: ${SELL_ALERT_THRESHOLD}`,
+      quote.date
+        ? `Обновлено: ${quote.date}${quote.time ? ` ${quote.time}` : ''}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const extra = Markup.inlineKeyboard([
+      Markup.button.callback('Увидел, хватит на сегодня', RATES_USD_SEEN_CALLBACK),
+    ]);
+
+    this.lastAlertSentAt = now;
+
+    for (const chatId of recipients) {
+      try {
+        await this.botService.sendMessage(chatId, text, extra);
+      } catch {
+        //
+      }
+    }
+  }
+
+  private async broadcast(text: string) {
     for (const chatId of this.botService.getAdminIds()) {
       try {
         await this.botService.sendMessage(chatId, text);
@@ -53,43 +151,18 @@ export class RatesService {
     }
   }
 
-  async buildUsdMessage(): Promise<string | null> {
-    const rates = await this.fetchPriorbankRates();
-    if (!rates) {
-      return null;
-    }
+  private buildCardMessage(quote: UsdQuote): string {
+    const lines = [
+      'Приорбанк — курс USD по карте',
+      '',
+      this.formatQuote(quote),
+    ];
 
-    const cash = this.pickUsd(rates.resultBranch);
-    const card = this.pickUsd(rates.resultCard);
-    const ebank = this.pickUsd(rates.resultEBank);
-
-    if (!cash && !card && !ebank) {
-      return null;
-    }
-
-    const lines = ['Приорбанк — курс USD'];
-
-    if (cash) {
-      lines.push('', 'Наличные:', this.formatQuote(cash));
-    }
-    if (card) {
-      lines.push('', 'По карте:', this.formatQuote(card));
-    }
-    if (ebank) {
-      lines.push('', 'Цифровой банк:', this.formatQuote(ebank));
-    }
-
-    const updated =
-      cash?.date || card?.date || ebank?.date
-        ? `${cash?.date || card?.date || ebank?.date}${
-            cash?.time || card?.time || ebank?.time
-              ? ` ${cash?.time || card?.time || ebank?.time}`
-              : ''
-          }`
-        : null;
-
-    if (updated) {
-      lines.push('', `Обновлено: ${updated}`);
+    if (quote.date) {
+      lines.push(
+        '',
+        `Обновлено: ${quote.date}${quote.time ? ` ${quote.time}` : ''}`,
+      );
     }
 
     return lines.join('\n');
@@ -100,7 +173,15 @@ export class RatesService {
   }
 
   private formatRate(value: number): string {
-    return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+    return value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  private async fetchCardUsd(): Promise<UsdQuote | null> {
+    const rates = await this.fetchPriorbankRates();
+    if (!rates) {
+      return null;
+    }
+    return this.pickUsd(rates.resultCard);
   }
 
   private pickUsd(raw: string | undefined): UsdQuote | null {
@@ -115,8 +196,7 @@ export class RatesService {
       return null;
     }
 
-    const list = bundle.simpleCurrencyList ?? [];
-    const matches = list.filter(
+    const matches = (bundle.simpleCurrencyList ?? []).filter(
       (item) => item.baseCurrency === USD && item.ratedCurrency === BYN,
     );
     if (matches.length === 0) {
