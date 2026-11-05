@@ -27,7 +27,7 @@ export class RatesController {
     );
     return this.ratesService.updateWatch(session.user.id, dto.key, {
       enabled: dto.enabled,
-      threshold: dto.threshold,
+      threshold: dto.threshold ?? undefined,
     });
   }
 

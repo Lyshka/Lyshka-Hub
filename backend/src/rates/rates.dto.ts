@@ -15,7 +15,10 @@ export const RATE_WATCH_KEYS = [
   'eur_sell',
 ] as const;
 
+export const RATE_ALERT_KEYS = ['usd_buy', 'eur_buy'] as const;
+
 export type RateWatchKey = (typeof RATE_WATCH_KEYS)[number];
+export type RateAlertKey = (typeof RATE_ALERT_KEYS)[number];
 
 export class RatesInitDto {
   @IsOptional()
@@ -28,8 +31,8 @@ export class RatesWatchDto {
   @IsString()
   initData?: string;
 
-  @IsIn(RATE_WATCH_KEYS)
-  key!: RateWatchKey;
+  @IsIn(RATE_ALERT_KEYS)
+  key!: RateAlertKey;
 
   @IsOptional()
   @IsBoolean()

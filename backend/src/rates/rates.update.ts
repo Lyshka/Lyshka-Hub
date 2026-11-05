@@ -1,6 +1,6 @@
 import { Action, Ctx, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
-import { RATE_WATCH_KEYS, type RateWatchKey } from './rates.dto';
+import { RATE_ALERT_KEYS, type RateAlertKey } from './rates.dto';
 import { RatesService } from './rates.service';
 
 @Update()
@@ -12,7 +12,7 @@ export class RatesUpdate {
     const userId = ctx.from?.id;
     const key = ctx.match?.[1] ?? '';
 
-    if (!userId || !this.isWatchKey(key)) {
+    if (!userId || !this.isAlertKey(key)) {
       return;
     }
 
@@ -31,7 +31,7 @@ export class RatesUpdate {
     }
   }
 
-  private isWatchKey(value: string): value is RateWatchKey {
-    return (RATE_WATCH_KEYS as readonly string[]).includes(value);
+  private isAlertKey(value: string): value is RateAlertKey {
+    return (RATE_ALERT_KEYS as readonly string[]).includes(value);
   }
 }

@@ -28,16 +28,6 @@ function formatMoney(value: number | null | undefined, digits = 2) {
   return value.toFixed(digits);
 }
 
-function sideLabel(side: string | null) {
-  if (side === 'buy') {
-    return 'Покупка';
-  }
-  if (side === 'sell') {
-    return 'Продажа';
-  }
-  return side ?? '';
-}
-
 export function RatesApp({ onBack }: RatesAppProps) {
   const { initData, haptic } = useTelegram();
   const [tab, setTab] = useState<Tab>('rates');
@@ -386,74 +376,77 @@ export function RatesApp({ onBack }: RatesAppProps) {
         {!loading && tab === 'alerts' ? (
           <div className="flex flex-col gap-3">
             <p className="px-1 text-sm" style={{ color: 'var(--tg-hint)' }}>
-              Включи нужные курсы и задай планку. Когда значение станет равно
-              или выше — бот начнёт писать каждую минуту.
+              Включи валюту и задай планку на покупку. Когда покупка станет
+              равна или выше — бот начнёт писать каждую минуту.
             </p>
-            {(data?.watches ?? []).map((watch) => (
-              <section
-                key={watch.key}
-                className="rounded-3xl px-4 py-4"
-                style={{ background: 'var(--app-surface)' }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-semibold">
-                      {watch.currency} · {sideLabel(watch.side)}
+            {(data?.watches ?? [])
+              .filter((watch) => watch.side === 'buy')
+              .map((watch) => (
+                <section
+                  key={watch.key}
+                  className="rounded-3xl px-4 py-4"
+                  style={{ background: 'var(--app-surface)' }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-semibold">{watch.currency}</div>
+                      <div
+                        className="mt-1 text-xs"
+                        style={{ color: 'var(--tg-hint)' }}
+                      >
+                        Покупка сейчас: {formatRate(watch.value)} BYN
+                        {watch.mutedToday ? ' · пауза до завтра' : ''}
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs" style={{ color: 'var(--tg-hint)' }}>
-                      Сейчас: {formatRate(watch.value)} BYN
-                      {watch.mutedToday ? ' · пауза до завтра' : ''}
-                    </div>
+                    <button
+                      type="button"
+                      disabled={busyKey === watch.key}
+                      onClick={() => void toggleWatch(watch)}
+                      className="rounded-xl px-3 py-2 text-xs font-semibold"
+                      style={{
+                        background: watch.enabled
+                          ? 'var(--tg-button)'
+                          : 'var(--app-bg)',
+                        color: watch.enabled
+                          ? 'var(--tg-button-text)'
+                          : 'var(--tg-hint)',
+                      }}
+                    >
+                      {watch.enabled ? 'Вкл' : 'Выкл'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    disabled={busyKey === watch.key}
-                    onClick={() => void toggleWatch(watch)}
-                    className="rounded-xl px-3 py-2 text-xs font-semibold"
-                    style={{
-                      background: watch.enabled
-                        ? 'var(--tg-button)'
-                        : 'var(--app-bg)',
-                      color: watch.enabled
-                        ? 'var(--tg-button-text)'
-                        : 'var(--tg-hint)',
-                    }}
-                  >
-                    {watch.enabled ? 'Вкл' : 'Выкл'}
-                  </button>
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <input
-                    value={draftThresholds[watch.key] ?? ''}
-                    onChange={(event) =>
-                      setDraftThresholds((prev) => ({
-                        ...prev,
-                        [watch.key]: event.target.value,
-                      }))
-                    }
-                    inputMode="decimal"
-                    placeholder="Планка, например 3.4"
-                    className="min-w-0 flex-1 rounded-2xl border-0 px-4 py-3 text-sm outline-none"
-                    style={{
-                      background: 'var(--app-bg)',
-                      color: 'var(--tg-text)',
-                    }}
-                  />
-                  <button
-                    type="button"
-                    disabled={busyKey === watch.key}
-                    onClick={() => void saveThreshold(watch)}
-                    className="rounded-2xl px-4 py-3 text-sm font-semibold"
-                    style={{
-                      background: 'var(--tg-button)',
-                      color: 'var(--tg-button-text)',
-                    }}
-                  >
-                    OK
-                  </button>
-                </div>
-              </section>
-            ))}
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={draftThresholds[watch.key] ?? ''}
+                      onChange={(event) =>
+                        setDraftThresholds((prev) => ({
+                          ...prev,
+                          [watch.key]: event.target.value,
+                        }))
+                      }
+                      inputMode="decimal"
+                      placeholder="Планка покупки, например 3.4"
+                      className="min-w-0 flex-1 rounded-2xl border-0 px-4 py-3 text-sm outline-none"
+                      style={{
+                        background: 'var(--app-bg)',
+                        color: 'var(--tg-text)',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={busyKey === watch.key}
+                      onClick={() => void saveThreshold(watch)}
+                      className="rounded-2xl px-4 py-3 text-sm font-semibold"
+                      style={{
+                        background: 'var(--tg-button)',
+                        color: 'var(--tg-button-text)',
+                      }}
+                    >
+                      OK
+                    </button>
+                  </div>
+                </section>
+              ))}
           </div>
         ) : null}
       </Shell>

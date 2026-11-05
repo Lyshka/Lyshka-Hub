@@ -10,7 +10,12 @@ import {
   type CardQuote,
   type CardRates,
 } from './rates.priorbank';
-import { RATE_WATCH_KEYS, type RateWatchKey } from './rates.dto';
+import {
+  RATE_ALERT_KEYS,
+  RATE_WATCH_KEYS,
+  type RateAlertKey,
+  type RateWatchKey,
+} from './rates.dto';
 import { fetchVisaUsdToEur } from './rates.visa';
 
 const TIME_ZONE = 'Europe/Minsk';
@@ -22,9 +27,9 @@ const WATCH_META: Record<
   RateWatchKey,
   { currency: 'USD' | 'EUR'; side: 'buy' | 'sell'; title: string }
 > = {
-  usd_buy: { currency: 'USD', side: 'buy', title: 'USD покупка' },
+  usd_buy: { currency: 'USD', side: 'buy', title: 'USD' },
   usd_sell: { currency: 'USD', side: 'sell', title: 'USD продажа' },
-  eur_buy: { currency: 'EUR', side: 'buy', title: 'EUR покупка' },
+  eur_buy: { currency: 'EUR', side: 'buy', title: 'EUR' },
   eur_sell: { currency: 'EUR', side: 'sell', title: 'EUR продажа' },
 };
 
@@ -50,14 +55,16 @@ export class RatesService {
 
     return {
       rates: this.serializeRates(rates),
-      watches: watches.map((watch) => this.serializeWatch(watch, rates)),
+      watches: watches
+        .filter((watch) => this.isAlertKey(watch.key))
+        .map((watch) => this.serializeWatch(watch, rates)),
       commissionRate: COMMISSION_RATE,
     };
   }
 
   async updateWatch(
     userId: number,
-    key: RateWatchKey,
+    key: RateAlertKey,
     data: { enabled?: boolean; threshold?: number | null },
   ) {
     await this.ensureWatches(userId);
@@ -181,7 +188,7 @@ export class RatesService {
 
     const newlyTriggered: Array<{
       userId: number;
-      key: RateWatchKey;
+      key: RateAlertKey;
       threshold: number;
       value: number;
     }> = [];
@@ -189,7 +196,7 @@ export class RatesService {
     this.activeKeys.clear();
 
     for (const watch of watches) {
-      if (!this.isWatchKey(watch.key) || watch.threshold == null) {
+      if (!this.isAlertKey(watch.key) || watch.threshold == null) {
         continue;
       }
       const value = this.readWatchValue(watch.key, rates);
@@ -234,7 +241,7 @@ export class RatesService {
     this.activeKeys.clear();
 
     for (const watch of watches) {
-      if (!this.isWatchKey(watch.key) || watch.threshold == null) {
+      if (!this.isAlertKey(watch.key) || watch.threshold == null) {
         continue;
       }
       const value = this.readWatchValue(watch.key, rates);
@@ -257,7 +264,7 @@ export class RatesService {
   private async sendWatchAlert(
     item: {
       userId: number;
-      key: RateWatchKey;
+      key: RateAlertKey;
       threshold: number;
       value: number;
     },
@@ -286,12 +293,12 @@ export class RatesService {
     const meta = WATCH_META[item.key];
     const quote = meta.currency === 'USD' ? rates.usd : rates.eur;
     const text = [
-      `Приорбанк — ${meta.title} выше планки`,
+      `Приорбанк — ${meta.title} покупка выше планки`,
       '',
-      `Сейчас: ${this.formatRate(item.value)} BYN`,
+      `Покупка: ${this.formatRate(item.value)} BYN`,
       `Планка: ${this.formatRate(item.threshold)} BYN`,
       quote
-        ? `Покупка: ${this.formatRate(quote.buy)} / Продажа: ${this.formatRate(quote.sell)}`
+        ? `Продажа: ${this.formatRate(quote.sell)} BYN`
         : null,
       quote?.date
         ? `Обновлено: ${quote.date}${quote.time ? ` ${quote.time}` : ''}`
@@ -336,6 +343,15 @@ export class RatesService {
         },
       });
     }
+
+    await this.prisma.rateWatch.updateMany({
+      where: {
+        userId: uid,
+        key: { in: ['usd_sell', 'eur_sell'] },
+        enabled: true,
+      },
+      data: { enabled: false },
+    });
 
     return this.prisma.rateWatch.findMany({
       where: { userId: uid },
@@ -450,6 +466,10 @@ export class RatesService {
 
   private isWatchKey(value: string): value is RateWatchKey {
     return (RATE_WATCH_KEYS as readonly string[]).includes(value);
+  }
+
+  private isAlertKey(value: string): value is RateAlertKey {
+    return (RATE_ALERT_KEYS as readonly string[]).includes(value);
   }
 
   private formatRate(value: number): string {
