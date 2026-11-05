@@ -164,17 +164,39 @@ export function AppIcon({ slug, className = 'h-9 w-9' }: AppIconProps) {
   if (slug === 'rates') {
     return (
       <svg viewBox="0 0 48 48" fill="none" className={className} aria-hidden>
-        <circle cx="24" cy="24" r="14" fill="currentColor" />
         <path
-          d="M18 28.5c2.2 2 4.2 3 6 3s3.8-1 6-3"
-          stroke="#fff"
-          strokeWidth="2.4"
+          d="M10 18.5h18.5"
+          stroke="currentColor"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          opacity="0.55"
+        />
+        <path
+          d="M23.5 13.5 29.5 18.5 23.5 23.5"
+          stroke="currentColor"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.55"
+        />
+        <path
+          d="M38 29.5H19.5"
+          stroke="currentColor"
+          strokeWidth="3.2"
           strokeLinecap="round"
         />
         <path
-          d="M20 18h8M24 15.5V30"
+          d="M24.5 24.5 18.5 29.5 24.5 34.5"
+          stroke="currentColor"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="34.5" cy="16.5" r="7" fill="currentColor" />
+        <path
+          d="M34.5 12.8v7.4M31.9 15h5.2M31.9 18.2h5.2"
           stroke="#fff"
-          strokeWidth="2.4"
+          strokeWidth="1.8"
           strokeLinecap="round"
         />
       </svg>

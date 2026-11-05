@@ -32,6 +32,7 @@ const WATCH_META: Record<
 export class RatesService {
   private cachedRates: CardRates | null = null;
   private cachedAt = 0;
+  private lastDigestSnapshot: string | null = null;
   private readonly activeKeys = new Set<RateWatchKey>();
   private readonly lastAlertSentAt = new Map<string, number>();
 
@@ -141,15 +142,26 @@ export class RatesService {
       return;
     }
 
+    const snapshot = this.buildRatesSnapshot(rates);
+    if (snapshot === this.lastDigestSnapshot) {
+      return;
+    }
+
     const text = this.buildDigestMessage(rates);
     const subscribers = await this.appsService.listSubscriberIds('rates');
 
+    let sent = false;
     for (const chatId of subscribers) {
       try {
         await this.botService.sendMessage(chatId, text);
+        sent = true;
       } catch {
         //
       }
+    }
+
+    if (sent || subscribers.length === 0) {
+      this.lastDigestSnapshot = snapshot;
     }
   }
 
@@ -342,6 +354,13 @@ export class RatesService {
       this.cachedAt = Date.now();
     }
     return rates ?? this.cachedRates;
+  }
+
+  private buildRatesSnapshot(rates: CardRates): string {
+    return [
+      rates.usd ? `usd:${rates.usd.buy}:${rates.usd.sell}` : 'usd:',
+      rates.eur ? `eur:${rates.eur.buy}:${rates.eur.sell}` : 'eur:',
+    ].join('|');
   }
 
   private buildDigestMessage(rates: CardRates): string {

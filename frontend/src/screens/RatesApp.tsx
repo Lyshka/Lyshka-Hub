@@ -42,6 +42,7 @@ export function RatesApp({ onBack }: RatesAppProps) {
   const { initData, haptic } = useTelegram();
   const [tab, setTab] = useState<Tab>('rates');
   const [data, setData] = useState<RatesOverview | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [draftThresholds, setDraftThresholds] = useState<Record<string, string>>(
@@ -79,9 +80,22 @@ export function RatesApp({ onBack }: RatesAppProps) {
   }, [initData]);
 
   useEffect(() => {
-    void load().catch((err: Error) => {
-      setError(err.message);
-    });
+    let alive = true;
+    setLoading(true);
+    void load()
+      .catch((err: Error) => {
+        if (alive) {
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
   }, [load]);
 
   async function toggleWatch(watch: RatesWatch) {
@@ -206,7 +220,20 @@ export function RatesApp({ onBack }: RatesAppProps) {
           </div>
         ) : null}
 
-        {tab === 'rates' ? (
+        {loading && !data ? (
+          <div
+            className="flex min-h-[40dvh] flex-col items-center justify-center gap-3 text-sm"
+            style={{ color: 'var(--tg-hint)' }}
+          >
+            <div
+              className="h-8 w-8 animate-spin rounded-full border-2 border-current border-t-transparent"
+              aria-hidden
+            />
+            Загрузка курсов…
+          </div>
+        ) : null}
+
+        {!loading && tab === 'rates' ? (
           <div className="flex flex-col gap-3">
             {(['usd', 'eur'] as const).map((currency) => {
               const quote = data?.rates[currency];
@@ -256,7 +283,7 @@ export function RatesApp({ onBack }: RatesAppProps) {
           </div>
         ) : null}
 
-        {tab === 'calc' ? (
+        {!loading && tab === 'calc' ? (
           <div className="flex flex-col gap-3">
             <section
               className="rounded-3xl px-4 py-4"
@@ -356,7 +383,7 @@ export function RatesApp({ onBack }: RatesAppProps) {
           </div>
         ) : null}
 
-        {tab === 'alerts' ? (
+        {!loading && tab === 'alerts' ? (
           <div className="flex flex-col gap-3">
             <p className="px-1 text-sm" style={{ color: 'var(--tg-hint)' }}>
               Включи нужные курсы и задай планку. Когда значение станет равно
