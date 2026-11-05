@@ -97,8 +97,8 @@ export class RatesService {
     }
 
     const eurAmount = amountUsd * visa.rate;
-    const eurSell = cardRates.eur.sell;
-    const bynAmount = eurAmount * eurSell;
+    const eurBuy = cardRates.eur.buy;
+    const bynAmount = eurAmount * eurBuy;
     const commission = bynAmount * COMMISSION_RATE;
     const total = bynAmount + commission;
 
@@ -112,7 +112,7 @@ export class RatesService {
       },
       eurAmount,
       priorbank: {
-        eurSell,
+        eurBuy,
         date: cardRates.eur.date ?? null,
         time: cardRates.eur.time ?? null,
       },

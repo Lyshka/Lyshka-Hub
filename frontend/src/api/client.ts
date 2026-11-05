@@ -137,7 +137,7 @@ export type RatesCalcResult =
       };
       eurAmount: number;
       priorbank: {
-        eurSell: number;
+        eurBuy: number;
         date: string | null;
         time: string | null;
       };

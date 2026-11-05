@@ -11,12 +11,12 @@ function formatVisaDate(date = new Date()): string {
   return `${month}/${day}/${year}`;
 }
 
-function parseConvertedAmount(raw: unknown): number | null {
+function parseAmount(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
     return raw;
   }
   if (typeof raw === 'string') {
-    const cleaned = raw.replace(/[^\d.,]/g, '').replace(',', '.');
+    const cleaned = raw.replace(/\s/g, '').replace(/,/g, '');
     const value = Number(cleaned);
     if (Number.isFinite(value) && value > 0) {
       return value;
@@ -25,47 +25,180 @@ function parseConvertedAmount(raw: unknown): number | null {
   return null;
 }
 
-async function fetchVisaCms(amount: number): Promise<number | null> {
-  const date = formatVisaDate();
+function extractUsdToEurRate(data: Record<string, unknown>): number | null {
+  const original = data.originalValues as Record<string, unknown> | undefined;
+  if (
+    original &&
+    original.fromCurrency === 'USD' &&
+    original.toCurrency === 'EUR'
+  ) {
+    const fromFx = parseAmount(original.fxRateVisa);
+    if (fromFx) {
+      return fromFx;
+    }
+    const toAmount = parseAmount(original.toAmountWithVisaRate);
+    const fromAmount = parseAmount(original.fromAmount) ?? 1;
+    if (toAmount && fromAmount > 0) {
+      return toAmount / fromAmount;
+    }
+  }
+
+  if (
+    data.conversionFromCurrency === 'EUR' &&
+    data.conversionToCurrency === 'USD'
+  ) {
+    return parseAmount(data.convertedAmount);
+  }
+
+  if (
+    data.conversionFromCurrency === 'USD' &&
+    data.conversionToCurrency === 'EUR'
+  ) {
+    return parseAmount(data.reverseAmount);
+  }
+
+  return null;
+}
+
+function buildVisaUrl(amount: number, date: string): string {
   const params = new URLSearchParams({
     amount: String(amount),
     fee: '0',
     utcConvertedDate: date,
     exchangedate: date,
-    fromCurr: 'USD',
-    toCurr: 'EUR',
+    fromCurr: 'EUR',
+    toCurr: 'USD',
   });
+  return `https://by.visa.com/cmsapi/fx/rates?${params.toString()}`;
+}
 
-  const response = await fetch(
-    `https://usa.visa.com/cmsapi/fx/rates?${params.toString()}`,
-    {
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      //
+    }
+  }
+
+  const marker = text.indexOf('{"originalValues"');
+  if (marker >= 0) {
+    let depth = 0;
+    for (let i = marker; i < text.length; i += 1) {
+      const ch = text[i];
+      if (ch === '{') {
+        depth += 1;
+      } else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return JSON.parse(text.slice(marker, i + 1)) as Record<
+              string,
+              unknown
+            >;
+          } catch {
+            return null;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+async function fetchJson(url: string): Promise<Record<string, unknown> | null> {
+  try {
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         Accept: 'application/json,text/plain,*/*',
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0',
         Referer:
-          'https://usa.visa.com/support/consumer/travel-support/exchange-rate-calculator.html',
+          'https://by.visa.com/support/consumer/travel-support/exchange-rate-calculator.html',
       },
-    },
-  );
+    });
 
-  if (!response.ok) {
+    if (!response.ok) {
+      return null;
+    }
+
+    const text = await response.text();
+    return extractJsonObject(text);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchViaJina(
+  visaUrl: string,
+): Promise<Record<string, unknown> | null> {
+  const variants = [
+    `https://r.jina.ai/${visaUrl}`,
+    `https://r.jina.ai/http://${visaUrl.replace(/^https?:\/\//, '')}`,
+  ];
+
+  for (const proxyUrl of variants) {
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+        },
+      });
+      if (!response.ok) {
+        continue;
+      }
+
+      const text = await response.text();
+      const parsed = extractJsonObject(text);
+      if (parsed?.data && typeof parsed.data === 'object') {
+        const content = (parsed.data as { content?: unknown }).content;
+        if (typeof content === 'string') {
+          const nested = extractJsonObject(content);
+          if (nested?.status === 'success') {
+            return nested;
+          }
+        }
+      }
+
+      if (parsed?.status === 'success') {
+        return parsed;
+      }
+    } catch {
+      //
+    }
+  }
+
+  return null;
+}
+
+async function fetchVisaCms(amount: number): Promise<VisaUsdEur | null> {
+  const date = formatVisaDate();
+  const visaUrl = buildVisaUrl(amount, date);
+
+  let data = await fetchJson(visaUrl);
+  if (!data) {
+    data = await fetchViaJina(visaUrl);
+  }
+  if (!data || data.status !== 'success') {
     return null;
   }
 
-  const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('json')) {
+  const rate = extractUsdToEurRate(data);
+  if (!rate) {
     return null;
   }
 
-  const data = (await response.json()) as Record<string, unknown>;
-  const converted = parseConvertedAmount(data.convertedAmount);
-  if (!converted) {
-    return null;
-  }
-
-  return converted / amount;
+  return {
+    rate,
+    source: 'visa',
+    asOf:
+      typeof data.conversionInputDate === 'string'
+        ? data.conversionInputDate
+        : date,
+  };
 }
 
 async function fetchFallbackUsdEur(): Promise<VisaUsdEur | null> {
@@ -95,17 +228,12 @@ async function fetchFallbackUsdEur(): Promise<VisaUsdEur | null> {
 }
 
 export async function fetchVisaUsdToEur(
-  amount = 1,
+  _amount = 1,
 ): Promise<VisaUsdEur | null> {
-  const safeAmount = amount > 0 ? amount : 1;
   try {
-    const visaRate = await fetchVisaCms(safeAmount);
-    if (visaRate) {
-      return {
-        rate: visaRate,
-        source: 'visa',
-        asOf: formatVisaDate(),
-      };
+    const visa = await fetchVisaCms(1);
+    if (visa) {
+      return visa;
     }
   } catch {
     //
