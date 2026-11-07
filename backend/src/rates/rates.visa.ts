@@ -26,20 +26,30 @@ function parseAmount(raw: unknown): number | null {
 }
 
 function extractUsdToEurRate(data: Record<string, unknown>): number | null {
+  if (
+    data.conversionFromCurrency === 'USD' &&
+    data.conversionToCurrency === 'EUR'
+  ) {
+    const reverse = parseAmount(data.reverseAmount);
+    if (reverse) {
+      return reverse;
+    }
+  }
+
   const original = data.originalValues as Record<string, unknown> | undefined;
   if (
     original &&
-    original.fromCurrency === 'USD' &&
-    original.toCurrency === 'EUR'
+    original.fromCurrency === 'EUR' &&
+    original.toCurrency === 'USD'
   ) {
-    const fromFx = parseAmount(original.fxRateVisa);
-    if (fromFx) {
-      return fromFx;
+    const fx = parseAmount(original.fxRateVisa);
+    if (fx) {
+      return 1 / fx;
     }
     const toAmount = parseAmount(original.toAmountWithVisaRate);
     const fromAmount = parseAmount(original.fromAmount) ?? 1;
     if (toAmount && fromAmount > 0) {
-      return toAmount / fromAmount;
+      return fromAmount / toAmount;
     }
   }
 
@@ -47,14 +57,11 @@ function extractUsdToEurRate(data: Record<string, unknown>): number | null {
     data.conversionFromCurrency === 'EUR' &&
     data.conversionToCurrency === 'USD'
   ) {
-    return parseAmount(data.convertedAmount);
-  }
-
-  if (
-    data.conversionFromCurrency === 'USD' &&
-    data.conversionToCurrency === 'EUR'
-  ) {
-    return parseAmount(data.reverseAmount);
+    const converted = parseAmount(data.convertedAmount);
+    const amount = parseAmount(data.conversionAmountValue) ?? 1;
+    if (converted && amount > 0) {
+      return amount / converted;
+    }
   }
 
   return null;
@@ -66,8 +73,8 @@ function buildVisaUrl(amount: number, date: string): string {
     fee: '0',
     utcConvertedDate: date,
     exchangedate: date,
-    fromCurr: 'EUR',
-    toCurr: 'USD',
+    fromCurr: 'USD',
+    toCurr: 'EUR',
   });
   return `https://by.visa.com/cmsapi/fx/rates?${params.toString()}`;
 }
@@ -176,7 +183,7 @@ async function fetchViaJina(
 
 async function fetchVisaCms(amount: number): Promise<VisaUsdEur | null> {
   const date = formatVisaDate();
-  const visaUrl = buildVisaUrl(amount, date);
+  const visaUrl = buildVisaUrl(Math.max(amount, 1), date);
 
   let data = await fetchJson(visaUrl);
   if (!data) {
@@ -228,10 +235,10 @@ async function fetchFallbackUsdEur(): Promise<VisaUsdEur | null> {
 }
 
 export async function fetchVisaUsdToEur(
-  _amount = 1,
+  amount = 1,
 ): Promise<VisaUsdEur | null> {
   try {
-    const visa = await fetchVisaCms(1);
+    const visa = await fetchVisaCms(amount);
     if (visa) {
       return visa;
     }

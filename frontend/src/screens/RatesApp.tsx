@@ -305,9 +305,8 @@ export function RatesApp({ onBack }: RatesAppProps) {
                 {calcBusy ? 'Считаю…' : 'Рассчитать'}
               </button>
               <p className="mt-3 text-xs leading-relaxed" style={{ color: 'var(--tg-hint)' }}>
-                USD → EUR по курсу Visa, затем EUR → BYN по покупке Приорбанка
-                по карте. Комиссия — {(data?.commissionRate ?? 0.01) * 100}% от
-                суммы в BYN.
+                USD → EUR по расчётному курсу Visa, затем EUR → BYN по покупке
+                Приорбанка по карте.
               </p>
             </section>
 
@@ -345,20 +344,6 @@ export function RatesApp({ onBack }: RatesAppProps) {
                     </span>
                     <span className="tabular-nums">
                       {formatRate(calc.priorbank.eurBuy)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span style={{ color: 'var(--tg-hint)' }}>Сумма BYN</span>
-                    <span className="tabular-nums">
-                      {formatMoney(calc.bynAmount, 2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span style={{ color: 'var(--tg-hint)' }}>
-                      Комиссия ({(calc.commissionRate * 100).toFixed(1)}%)
-                    </span>
-                    <span className="tabular-nums">
-                      {formatMoney(calc.commission, 2)} BYN
                     </span>
                   </div>
                   <div className="mt-2 flex justify-between gap-3 border-t pt-3 text-base font-semibold">

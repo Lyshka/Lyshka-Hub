@@ -19,7 +19,7 @@ import {
 import { fetchVisaUsdToEur } from './rates.visa';
 
 const TIME_ZONE = 'Europe/Minsk';
-const COMMISSION_RATE = 0.01;
+const COMMISSION_RATE = 0;
 
 export const RATES_SEEN_PREFIX = 'rates:seen:';
 
@@ -107,8 +107,7 @@ export class RatesService {
     const eurAmount = amountUsd * visa.rate;
     const eurBuy = cardRates.eur.buy;
     const bynAmount = eurAmount * eurBuy;
-    const commission = bynAmount * COMMISSION_RATE;
-    const total = bynAmount + commission;
+    const total = bynAmount;
 
     return {
       ok: true as const,
@@ -126,7 +125,7 @@ export class RatesService {
       },
       bynAmount,
       commissionRate: COMMISSION_RATE,
-      commission,
+      commission: 0,
       total,
     };
   }
